@@ -1,0 +1,905 @@
+{
+  "datasets": [
+    {
+      "name": "adr",
+      "displayName": "JSL product-reaction reference",
+      "catalog": "john_snow_labs_adverse_drug_and_product_reaction",
+      "schema": "drug_and_product_reaction",
+      "config": {
+        "source": "john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction.adverse_reaction_with_preferred_term_and_system_organ_class_codes",
+        "measures": [
+          {
+            "name": "rows",
+            "expr": "COUNT(1)"
+          },
+          {
+            "name": "products",
+            "expr": "COUNT(DISTINCT Medicinal_Product)"
+          },
+          {
+            "name": "substances",
+            "expr": "COUNT(DISTINCT Active_Substance)"
+          },
+          {
+            "name": "reaction_terms",
+            "expr": "COUNT(DISTINCT Adverse_Drug_Reaction_Term)"
+          },
+          {
+            "name": "meddra_pts",
+            "expr": "COUNT(DISTINCT MedDRA_PT_Code)"
+          }
+        ],
+        "version": "1.1",
+        "comment": "Reference rows, NOT incident counts, causality proof or live adverse-event reports; Date_Of_Most_Recent_SPC is the label/SPC date.",
+        "dimensions": [
+          {
+            "name": "Is_Clinical_Trial",
+            "expr": "Is_Clinical_Trial"
+          },
+          {
+            "name": "Is_Post_Marketing_Surveillance",
+            "expr": "Is_Post_Marketing_Surveillance"
+          },
+          {
+            "name": "Is_Class_Warning",
+            "expr": "Is_Class_Warning"
+          },
+          {
+            "name": "Frequency",
+            "expr": "Frequency"
+          },
+          {
+            "name": "Causality",
+            "expr": "Causality"
+          },
+          {
+            "name": "Age_Group",
+            "expr": "Age_Group"
+          },
+          {
+            "name": "Gender",
+            "expr": "Gender"
+          }
+        ]
+      }
+    },
+    {
+      "name": "chemicals",
+      "displayName": "JSL chemical-disease evidence",
+      "catalog": "john_snow_labs_adverse_drug_and_product_reaction",
+      "schema": "drug_and_product_reaction",
+      "config": {
+        "source": "john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction.chemicals_contributing_to_disease",
+        "measures": [
+          {
+            "name": "relations",
+            "expr": "COUNT(1)"
+          },
+          {
+            "name": "distinct_chemicals",
+            "expr": "COUNT(DISTINCT Chemical_Id)"
+          },
+          {
+            "name": "distinct_diseases",
+            "expr": "COUNT(DISTINCT Disease_Id)"
+          }
+        ],
+        "version": "1.1",
+        "comment": "Literature-annotated relations, not clinical causality or observed incident counts.",
+        "dimensions": [
+          {
+            "name": "Patient_Relation_Type",
+            "expr": "Patient_Relation_Type"
+          },
+          {
+            "name": "Patient_Relation_Type_Verification",
+            "expr": "Patient_Relation_Type_Verification"
+          }
+        ]
+      }
+    },
+    {
+      "name": "narrative_relations",
+      "displayName": "JSL patient narrative relation labels",
+      "catalog": "john_snow_labs_adverse_drug_and_product_reaction",
+      "schema": "drug_and_product_reaction",
+      "config": {
+        "source": "john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction.drug_relationship_database",
+        "measures": [
+          {
+            "name": "relations",
+            "expr": "COUNT(1)"
+          },
+          {
+            "name": "documents",
+            "expr": "COUNT(DISTINCT Document_Id)"
+          }
+        ],
+        "version": "1.1",
+        "comment": "Aggregated relationship labels only. Do not expose Remarks_by_Patient: free text may include personal data.",
+        "dimensions": [
+          {
+            "name": "Patient_Relation_Type",
+            "expr": "Patient_Relation_Type"
+          },
+          {
+            "name": "Patient_Relation_Description",
+            "expr": "Patient_Relation_Description"
+          }
+        ]
+      }
+    }
+  ],
+  "pages": [
+    {
+      "name": "adr",
+      "displayName": "Product-Reaction Reference",
+      "layout": [
+        {
+          "widget": {
+            "name": "header",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## DrugSafety360 — John Snow Labs | Verified source data\n",
+                "**SOURCE PREVIEW ONLY:** shared Marketplace catalog is queryable. Bronze/Silver/Gold tables and scheduled jobs are NOT deployed. Counts are reference-record/label associations, NOT reports, rates, patient incidence, or causal risk. SPC dates are label dates."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "adr_rows",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "adr",
+                  "fields": [
+                    {
+                      "name": "measure(rows)",
+                      "expression": "MEASURE(`rows`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Reference rows"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(rows)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "adr_prod",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "adr",
+                  "fields": [
+                    {
+                      "name": "measure(products)",
+                      "expression": "MEASURE(`products`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Distinct products"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(products)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "adr_subs",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "adr",
+                  "fields": [
+                    {
+                      "name": "measure(substances)",
+                      "expression": "MEASURE(`substances`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Distinct active substances"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(substances)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "adr_terms",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "adr",
+                  "fields": [
+                    {
+                      "name": "measure(reaction_terms)",
+                      "expression": "MEASURE(`reaction_terms`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Distinct reaction terms"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(reaction_terms)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "clinical_flag",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "adr",
+                  "fields": [
+                    {
+                      "name": "Is_Clinical_Trial",
+                      "expression": "`Is_Clinical_Trial`"
+                    },
+                    {
+                      "name": "measure(rows)",
+                      "expression": "MEASURE(`rows`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Reference rows: clinical-trial flag"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Is_Clinical_Trial",
+                  "displayName": "Is_Clinical_Trial",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(rows)",
+                  "displayName": "rows",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "postmarketing_flag",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "adr",
+                  "fields": [
+                    {
+                      "name": "Is_Post_Marketing_Surveillance",
+                      "expression": "`Is_Post_Marketing_Surveillance`"
+                    },
+                    {
+                      "name": "measure(rows)",
+                      "expression": "MEASURE(`rows`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Reference rows: post-marketing flag"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Is_Post_Marketing_Surveillance",
+                  "displayName": "Is_Post_Marketing_Surveillance",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(rows)",
+                  "displayName": "rows",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 5,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "class_warning",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "adr",
+                  "fields": [
+                    {
+                      "name": "Is_Class_Warning",
+                      "expression": "`Is_Class_Warning`"
+                    },
+                    {
+                      "name": "measure(rows)",
+                      "expression": "MEASURE(`rows`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Class-wide warning flag"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Is_Class_Warning",
+                  "displayName": "Is_Class_Warning",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(rows)",
+                  "displayName": "rows",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "frequency",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "adr",
+                  "fields": [
+                    {
+                      "name": "Frequency",
+                      "expression": "`Frequency`"
+                    },
+                    {
+                      "name": "measure(rows)",
+                      "expression": "MEASURE(`rows`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Reference rows by labeled frequency"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Frequency",
+                  "displayName": "Frequency",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(rows)",
+                  "displayName": "rows",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 10,
+            "width": 6,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "evidence",
+      "displayName": "Chemical & Narrative Labels",
+      "layout": [
+        {
+          "widget": {
+            "name": "evidence_header",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Chemical–disease evidence and narrative relation classification\n",
+                "Separate annotation datasets. No causal inference. Narrative text is intentionally excluded from this dashboard for privacy."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "chem_rows",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "chemicals",
+                  "fields": [
+                    {
+                      "name": "measure(relations)",
+                      "expression": "MEASURE(`relations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Chemical–disease annotation rows"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(relations)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "chem_subs",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "chemicals",
+                  "fields": [
+                    {
+                      "name": "measure(distinct_chemicals)",
+                      "expression": "MEASURE(`distinct_chemicals`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Distinct chemical IDs"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(distinct_chemicals)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "chem_dis",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "chemicals",
+                  "fields": [
+                    {
+                      "name": "measure(distinct_diseases)",
+                      "expression": "MEASURE(`distinct_diseases`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Distinct disease IDs"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(distinct_diseases)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "rel_rows",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "narrative_relations",
+                  "fields": [
+                    {
+                      "name": "measure(relations)",
+                      "expression": "MEASURE(`relations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Narrative relation rows"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(relations)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "chem_relation",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "chemicals",
+                  "fields": [
+                    {
+                      "name": "Patient_Relation_Type",
+                      "expression": "`Patient_Relation_Type`"
+                    },
+                    {
+                      "name": "measure(relations)",
+                      "expression": "MEASURE(`relations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Chemical–disease relation labels"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Patient_Relation_Type",
+                  "displayName": "Patient_Relation_Type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(relations)",
+                  "displayName": "relations",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "narr_relation",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "narrative_relations",
+                  "fields": [
+                    {
+                      "name": "Patient_Relation_Description",
+                      "expression": "`Patient_Relation_Description`"
+                    },
+                    {
+                      "name": "measure(relations)",
+                      "expression": "MEASURE(`relations`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Narrative relation labels"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Patient_Relation_Description",
+                  "displayName": "Patient_Relation_Description",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(relations)",
+                  "displayName": "relations",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 5,
+            "width": 6,
+            "height": 5
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "status",
+      "displayName": "Deployment & Governance",
+      "layout": [
+        {
+          "widget": {
+            "name": "status_text",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Deployment and data-governance status\n",
+                "\n",
+                "**VERIFIED:** Installed catalog `john_snow_labs_adverse_drug_and_product_reaction`, schema `drug_and_product_reaction`, and three readable source tables.\n",
+                "\n",
+                "**NOT DEPLOYED:** No `drugsafety360_bronze`, `drugsafety360_silver`, `drugsafety360_gold` or data-quality job resources have been created here. This assistant connection supports SQL/Genie reads and AI/BI dashboard management, not writing Unity Catalog objects or workspace notebook/job deployment.\n",
+                "\n",
+                "**Refresh semantics:** The provider sample is dated historical/reference data, not a Kafka/live adverse-event stream. Source changes could be detected on a scheduled batch poll, subject to provider updates and Free Edition quotas. Label date (`Date_Of_Most_Recent_SPC`) is NOT the adverse-event occurrence date.\n",
+                "\n",
+                "**Privacy:** Never expose `drug_relationship_database.Remarks_by_Patient` in public dashboards; review provider licensing and downstream access before copying any source data.\n",
+                "\n",
+                "**Interpretation:** Counts are product/reaction reference rows and annotation labels, not number of patients, reports, risk, incidence, proof of causality, or medical advice."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 10
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ]
+}
