@@ -200,5 +200,31 @@ def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
         quality = runtime.table("workspace.drugsafety360_ops.quality_check_log")
         assert quality.count() >= 6
         assert quality.where("passed = false").count() == 0
+
+        # A changed provider snapshot must append exactly one NEW ADR version,
+        # update Silver current and Gold, and preserve earlier Bronze rows.
+        source_name = SOURCE + ".adverse_reaction_with_preferred_term_and_system_organ_class_codes"
+        existing_source = runtime.table(source_name)
+        newer = spark.createDataFrame([
+            ("Drug C", "Active C", date(2016, 5, 1), "Rash", "Rash", 122, 100,
+             "Unspecified", "Unspecified", "Possible", "Uncommon", False, False, True)
+        ], schema=existing_source.schema)
+        runtime.tables[source_name] = existing_source.unionByName(newer)
+        _execute_notebook("01_bronze_ingest.py", runtime)
+        assert runtime.table(bronze).count() == 9  # first 4 rows + second 5-row snapshot
+        assert runtime.table(bronze).select("_snapshot_id").distinct().count() == 2
+        new_log = runtime.table("workspace.drugsafety360_ops.ingestion_log")
+        assert new_log.count() == 9
+        assert new_log.where("changed = true").count() == 4  # first 3 + changed ADR
+
+        _execute_notebook("02_silver_standardize.py", runtime)
+        _execute_notebook("03_gold_analytics.py", runtime)
+        updated = runtime.table("workspace.drugsafety360_gold.executive_metrics").first()
+        assert updated["reference_rows"] == 4  # 5 source records less 1 quarantined
+        assert updated["distinct_products"] == 3
+        _execute_notebook("04_quality_gate.py", runtime)
+        quality = runtime.table("workspace.drugsafety360_ops.quality_check_log")
+        assert quality.count() >= 12
+        assert quality.where("passed = false").count() == 0
     finally:
         spark.stop()
