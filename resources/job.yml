@@ -1,0 +1,41 @@
+resources:
+  jobs:
+    drugsafety360_refresh:
+      name: "[${bundle.target}] DrugSafety360 | JSL snapshots → Bronze → Silver → Gold → Quality"
+      description: "Historical source-change polling; NOT a real-time adverse-event feed."
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 3 * * ?"
+        timezone_id: "UTC"
+        pause_status: PAUSED
+      tasks:
+        - task_key: bronze_ingest
+          max_retries: 1
+          notebook_task:
+            notebook_path: ../src/01_bronze_ingest.py
+            base_parameters:
+              target_catalog: ${var.target_catalog}
+        - task_key: silver_standardize
+          depends_on:
+            - task_key: bronze_ingest
+          max_retries: 1
+          notebook_task:
+            notebook_path: ../src/02_silver_standardize.py
+            base_parameters:
+              target_catalog: ${var.target_catalog}
+        - task_key: gold_analytics
+          depends_on:
+            - task_key: silver_standardize
+          max_retries: 1
+          notebook_task:
+            notebook_path: ../src/03_gold_analytics.py
+            base_parameters:
+              target_catalog: ${var.target_catalog}
+        - task_key: quality_gate
+          depends_on:
+            - task_key: gold_analytics
+          max_retries: 0
+          notebook_task:
+            notebook_path: ../src/04_quality_gate.py
+            base_parameters:
+              target_catalog: ${var.target_catalog}

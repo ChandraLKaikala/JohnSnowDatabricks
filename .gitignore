@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.databricks/
+.env
+.env.*
+!.env.example
+*.token
+*.pem
+.DS_Store
