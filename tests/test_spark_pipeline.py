@@ -172,6 +172,8 @@ def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
         assert log.count() == 6
         assert log.where("changed = true").count() == 3
         assert log.where("changed = false").count() == 3
+        assert log.where("snapshot_id = 'unchanged'").count() == 0
+        assert log.select("poll_run_id").distinct().count() == 2
 
         _execute_notebook("02_silver_standardize.py", runtime)
         valid = runtime.table("workspace.drugsafety360_silver.adr_reference_current")
@@ -216,6 +218,7 @@ def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
         new_log = runtime.table("workspace.drugsafety360_ops.ingestion_log")
         assert new_log.count() == 9
         assert new_log.where("changed = true").count() == 4  # first 3 + changed ADR
+        assert new_log.select("poll_run_id").distinct().count() == 3
 
         _execute_notebook("02_silver_standardize.py", runtime)
         _execute_notebook("03_gold_analytics.py", runtime)
@@ -226,5 +229,38 @@ def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
         quality = runtime.table("workspace.drugsafety360_ops.quality_check_log")
         assert quality.count() >= 12
         assert quality.where("passed = false").count() == 0
+
+        # Fault injection: missing THIRD source after FIRST source changed must
+        # prevent all earlier Bronze snapshot writes and any poll log append.
+        source_table = SOURCE + ".adverse_reaction_with_preferred_term_and_system_organ_class_codes"
+        old_source = runtime.table(source_table)
+        extra_source_row = spark.createDataFrame([
+            ("Drug D", "Active D", date(2016, 5, 2), "Fever", "Fever", 123, 100,
+             "Unspecified", "Unspecified", "Possible", "Rare", False, False, True)
+        ], schema=old_source.schema)
+        runtime.tables[source_table] = old_source.unionByName(extra_source_row)
+        missing_name = SOURCE + ".drug_relationship_database"
+        saved_narrative = runtime.tables.pop(missing_name)
+        bronze_rows_before = runtime.table(bronze).count()
+        poll_rows_before = runtime.table("workspace.drugsafety360_ops.ingestion_log").count()
+        try:
+            with pytest.raises(RuntimeError, match="Table missing in synthetic runtime"):
+                _execute_notebook("01_bronze_ingest.py", runtime)
+        finally:
+            runtime.tables[missing_name] = saved_narrative
+            runtime.tables[source_table] = old_source
+        assert runtime.table(bronze).count() == bronze_rows_before
+        assert runtime.table("workspace.drugsafety360_ops.ingestion_log").count() == poll_rows_before
+
+        # Fault injection: if one Gold mart is truncated, the quality Job MUST
+        # record failed checks before raising, not give a false passing result.
+        frequency_name = "workspace.drugsafety360_gold.frequency_mix"
+        frequency_before = runtime.table(frequency_name)
+        runtime.tables[frequency_name] = frequency_before.where("frequency_category != 'Common'")
+        with pytest.raises(RuntimeError, match="gold_frequency_mix_matches_silver"):
+            _execute_notebook("04_quality_gate.py", runtime)
+        quality = runtime.table("workspace.drugsafety360_ops.quality_check_log")
+        assert quality.where("passed = false").count() >= 1
+        runtime.tables[frequency_name] = frequency_before
     finally:
         spark.stop()
