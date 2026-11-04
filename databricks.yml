@@ -6,12 +6,15 @@ include:
 
 variables:
   target_catalog:
-    description: Writable catalog for isolated project data; never point at the Marketplace catalog
+    description: Writable catalog for isolated project tables; never the Marketplace catalog
     default: workspace
 
 targets:
   dev:
     default: true
     mode: development
+    # Deliberately use the standard bundle deployment path OUTSIDE any Git folder.
+    # Keep the Git checkout in /Workspace/Users/<user>/DrugSafety360, while
+    # deployed job artifacts live under /Workspace/Users/<user>/.bundle/.
     workspace:
-      root_path: /Workspace/Users/${workspace.current_user.userName}/DrugSafety360/.bundle/${bundle.name}/${bundle.target}
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
