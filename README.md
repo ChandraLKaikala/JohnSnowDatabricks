@@ -34,6 +34,8 @@ A serverless four-task Databricks Job runs **Bronze → Silver → Gold → Qual
 - `src/04_quality_gate.py`: source/Gold consistency checks and append-only quality log.
 - `databricks.yml` + `resources/job.yml`: Databricks Asset Bundle and paused serverless Job.
 - `sql/read_only_source_validation.sql`: source SQL checks.
+- `sql/post_deployment_validation.sql`: read-only Silver/Gold/quality reconciliation to run after first deployment.
+- `dashboards/jsl_source_explorer.lvdash.json`: serialized *source-data* AI/BI dashboard exported from the connected Databricks draft (3 pages, 17 widgets; importing this file does not automatically publish or execute it).
 - `tests/test_contract.py` + `.github/workflows/static-checks.yml`: static syntax/config assertions.
 - `docs/CELL_BY_CELL.md`: **cell-by-cell explanations** matching each notebook's explicit `# COMMAND ----------` boundaries.
 - `docs/ARCHITECTURE.md`: detailed design and governance explanation.
