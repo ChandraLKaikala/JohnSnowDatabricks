@@ -14,6 +14,7 @@ import pytest
 pyspark = pytest.importorskip("pyspark")
 from pyspark.sql import SparkSession
 from pyspark.sql import types as T
+from pyspark.sql import functions as F
 from pyspark.sql.readwriter import DataFrameWriter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -251,6 +252,33 @@ def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
             runtime.tables[source_table] = old_source
         assert runtime.table(bronze).count() == bronze_rows_before
         assert runtime.table("workspace.drugsafety360_ops.ingestion_log").count() == poll_rows_before
+
+        # Append an unlogged "newer" Bronze snapshot, as if a later
+        # three-source poll failed before its final ingestion log append.
+        # Silver MUST keep using the last committed poll's source IDs.
+        before_orphan = runtime.table(bronze)
+        orphan = (before_orphan.where("Medicinal_Product = 'Drug C'")
+                  .withColumn("_snapshot_id", F.lit("UNCOMMITTED_ORPHAN"))
+                  .withColumn("_captured_at", F.current_timestamp()))
+        assert orphan.count() == 1
+        runtime.tables[bronze] = before_orphan.unionByName(orphan)
+        _execute_notebook("02_silver_standardize.py", runtime)
+        accepted = runtime.table("workspace.drugsafety360_silver.adr_reference_current")
+        assert accepted.count() == 4
+        ids = [row[0] for row in accepted.select("source_snapshot_id").distinct().collect()]
+        assert len(ids) == 1 and ids[0] != "UNCOMMITTED_ORPHAN"
+        _execute_notebook("03_gold_analytics.py", runtime)
+        _execute_notebook("04_quality_gate.py", runtime)
+        assert runtime.table("workspace.drugsafety360_gold.executive_metrics").first()["reference_rows"] == 4
+
+        # A same-size Silver table with the WRONG snapshot ID must fail.
+        silver_name = "workspace.drugsafety360_silver.adr_reference_current"
+        original_silver = runtime.table(silver_name)
+        runtime.tables[silver_name] = original_silver.withColumn(
+            "source_snapshot_id", F.lit("NOT_THE_COMMITTED_SNAPSHOT"))
+        with pytest.raises(RuntimeError, match="silver_snapshot_adr_reference_0"):
+            _execute_notebook("04_quality_gate.py", runtime)
+        runtime.tables[silver_name] = original_silver
 
         # Fault injection: if one Gold mart is truncated, the quality Job MUST
         # record failed checks before raising, not give a false passing result.
