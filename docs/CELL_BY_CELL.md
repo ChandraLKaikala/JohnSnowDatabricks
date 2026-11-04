@@ -52,7 +52,7 @@ This guide follows the `# COMMAND ----------` boundaries in the six source noteb
 
 ### Cell 1 — Isolated writable schemas
 - Declares `target_catalog` widget. Only `workspace` is accepted.
-- Creates `workspace.drugsafety360_bronze` and `workspace.drugsafety360_ops` if authorized.
+- Defers schema creation until every Marketplace source has been validated as readable, structurally compatible, and nonempty.
 - Never writes to Marketplace, CareFlow360 or Retail-AI catalogs/schemas.
 - The explicit catalog guard protects against accidentally overwriting a provider share.
 
@@ -68,13 +68,13 @@ This guide follows the `# COMMAND ----------` boundaries in the six source noteb
 - Caveat: hash-based comparisons are not a general CDC guarantee. Full scans cost compute; the privacy/licensing position still applies.
 
 ### Cell 4 — Ingest and validate
-- Reads only required columns; fails if expected fields vanish.
-- Rejects empty source tables to prevent accidentally replacing valid downstream data with empty snapshots.
+- Validates and caches all THREE source tables before writing. Missing/empty third-source data cannot cause a partial first/second-source refresh.
+- Rejects empty source tables before any workspace schema creation or snapshot write.
 - Writes a new Delta **append** snapshot only when the multiset changes. Each write has `_snapshot_id`, `_captured_at`, `_source_table`, `_record_hash`.
-- On unchanged data, retains the old Bronze snapshot; operational log still records the poll.
+- On unchanged data, retains the previous Bronze snapshot and logs its REAL snapshot ID, not the string `unchanged`. Each three-source poll uses one unique `poll_run_id`.
 
 ### Cell 5 — Observability
-- Appends `ingestion_log` with source, source rows, changed flag, and check timestamp.
+- Cell 4 appends `ingestion_log` only after all three source snapshot writes succeed; the log contains `poll_run_id`, source name, row count, actual active snapshot ID, changed flag and check timestamp. Cached source frames are unpersisted even on failure.
 - This is a low-cost basis for a freshness/operations report; it does **not** mean every change was immediately observed.
 
 ## Notebook 02_silver_standardize.py — Normalized Silver plus quarantine
@@ -133,14 +133,14 @@ This guide follows the `# COMMAND ----------` boundaries in the six source noteb
 - No CareFlow/Retail modification.
 
 ### Cell 2 — Null and non-empty checks
-- Requires all three Silver current tables to contain rows.
-- Rejects accepted ADR rows with missing product/reaction term.
-- Records quarantine row count for visibility; quarantine alone does not fail the run.
+- Reconciles latest Bronze snapshot counts to all three corresponding Silver tables, including quarantined ADR records.
+- Requires current Silver tables to be nonempty; rejected ADR rows are retained in quarantine.
+- Checks that all three latest Bronze snapshot IDs equal the IDs logged for the last completed ingestion poll.
 
 ### Cell 3 — Cross-layer reconciliation
 - Requires exactly one executive metrics row.
-- Compares Gold reference row count with accepted Silver ADR row count.
-- This is a pipeline integrity check, not clinical data validation.
+- Reconciles executive metrics and all SIX additional Gold summaries to their Silver source counts.
+- This is an engineering consistency check, not clinical safety validation.
 
 ### Cell 4 — Append log, fail if required
 - Appends a timestamped record of each test to `quality_check_log`.

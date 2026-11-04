@@ -3,7 +3,7 @@ on:
   push:
     branches:
       - main
-      - fix/audited-databricks-deployment
+      - 'fix/**'
   pull_request:
     branches: [main]
 permissions:

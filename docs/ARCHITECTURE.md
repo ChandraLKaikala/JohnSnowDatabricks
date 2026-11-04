@@ -54,6 +54,8 @@ A source table is not a Kafka topic. There is no dependable event ID in the veri
 3. Group hashes and compare their multiplicities against the newest captured snapshot.
 4. If unchanged, do not append another Bronze copy.
 5. If changed, write a new snapshot with ID, capture timestamp, source name and hash.
+6. Validate/cache ALL three provider tables before attempting the first write, including the normally last narrative source.
+7. Log a unique poll run ID and the actual active source snapshot ID even when unchanged; this enables lineage checks. Multi-table writes still are not atomic.
 
 This design is **idempotent for unchanged source** in sequential runs. It is not transactional across all three sources; concurrent writers should be disabled. Full snapshot polling is finite-cost but not strictly incremental.
 
@@ -93,7 +95,7 @@ For Free Edition keep costs bounded: one job run at once, no simultaneous tasks,
 - Ingestion: compare hash counts, refuse empty sources, append poll log.
 - Silver: quarantine missing ADR product/reaction, preserve provenance hashes.
 - Gold: descriptive aggregates and timestamped computation.
-- Quality gate: ensure nonempty current tables, accepted-row constraints, one executive row and Gold/Silver reference-row equality.
+- Quality gate: check all three Bronze-to-Silver count reconciliations, the latest completed poll's snapshot lineage and all seven Gold-to-Silver reference/annotation count reconciliations.
 - Limitations: no automated medical/coding validation, no source SLA, no reliable source event-time latency measure, no regulatory compliance certification.
 
 ## Existing-workspace cleanup isolation

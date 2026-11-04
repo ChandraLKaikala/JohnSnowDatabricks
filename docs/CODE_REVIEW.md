@@ -52,3 +52,15 @@ To make this test work without Databricks Unity Catalog locally, it **replaces t
 6. CareFlow360/Retail-AI workspace notebook folder cleanup: separate inventory and dependency checks are required; no file moves or deletions occurred.
 
 **Source truth:** reference/label rows and literature annotations are not individual adverse-event cases, risk denominators, live incident rates, or proof of causal effect.
+
+
+## Reliability audit: source-preflight and lineage fixes (November 2026)
+
+The earlier CI did NOT test failures caused by an unreadable third source, nor did it reconcile all seven Gold marts. We corrected these gaps:
+
+- Validate and cache all three JSL source tables before any schema creation or snapshot writes. This prevents a predictable partial update if a later source is missing or empty.
+- Use a single `poll_run_id` for three source logs and record the actual active snapshot ID, including unchanged runs.
+- The quality gate now compares Bronze-to-Silver row totals, completed-poll IDs against latest Bronze snapshots, and all seven Gold marts against Silver totals.
+- Synthetic PySpark CI injects an unreadable third source after adding a source row and verifies no Bronze/log writes; it also truncates a Gold mart and requires an explicit logged quality failure.
+
+**Still not guaranteed:** multi-table ACID atomicity, licensed copying rights, real Delta/Unity Catalog writes, Databricks job deployment, or quota availability. Do not call the pipeline production-ready solely because CI is green.

@@ -72,3 +72,8 @@ A manual alternative is to run the notebook sequence from the Git folder (Bronze
 The repository's checks parse notebook Python, validate YAML and isolation contracts, and **run notebook transformations using local PySpark with synthetic source rows and an in-memory replacement for table writes**. This does not perform real Databricks Delta/Unity Catalog writes or Databricks Asset Bundle validation. **Workspace permissions, provider terms, runtime availability, Delta sink behavior, actual job scheduling and dashboard rendering still require validation in your workspace.** No one can truthfully promise zero execution errors without that environment test.
 
 See [DEPLOYMENT_GUIDE](docs/DEPLOYMENT_GUIDE.md), [CELL_BY_CELL](docs/CELL_BY_CELL.md), [ARCHITECTURE](docs/ARCHITECTURE.md) and [PRESENTATION](PRESENTATION.md).
+
+
+### Reliability corrections
+
+The latest audit adds all-source preflight before any Bronze writes, a poll-level run ID with real active snapshot IDs, full Bronze/Silver/Gold count reconciliation, and failure-path PySpark tests. See [CODE_REVIEW](docs/CODE_REVIEW.md). It still cannot guarantee atomic cross-table commits or runtime compatibility in your Databricks workspace.

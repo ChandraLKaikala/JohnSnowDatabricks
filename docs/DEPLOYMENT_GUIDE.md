@@ -74,7 +74,7 @@ The existing Databricks `DrugSafety360 — John Snow Labs Source Explorer [Medal
 Only after Gold tables exist and pass quality checks, create or edit an AI/BI dashboard whose queries reference `workspace.drugsafety360_gold` tables. Do not reuse a stale visualization expecting nonexistent tables.
 
 ## 7. Rollback, retry and recovery
-- A failed job can leave partially created project-owned tables. Inspect the exact failure and run log; rerun from Bronze only when source/license issues are fixed.
+- All three sources are checked before any Bronze writes. However, a later Delta failure can still leave some project-owned tables updated: there is no atomic transaction across Bronze, Silver and Gold. The quality gate checks latest poll lineage and aggregate reconciliations. Inspect the failure and logs before rerunning.
 - If source columns changed, update documented schema mapping and tests; do not force positional casts.
 - If permissions fail, obtain the minimum required catalog create/schema/table privileges; no credentials belong in GitHub.
 - If the job exhausts Free Edition quota, reduce schedule frequency, shut down unused resources, and use manual notebook runs.

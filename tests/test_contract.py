@@ -82,3 +82,16 @@ def test_post_deployment_sql_is_read_only():
     assert "QUALITY_CHECK_LOG" in sql
     for prefix in ("DROP ", "DELETE FROM ", "TRUNCATE ", "ALTER TABLE ", "INSERT INTO "):
         assert prefix not in sql
+
+
+def test_reliability_contract_is_documented_and_enabled():
+    bronze = (ROOT / 'src/01_bronze_ingest.py').read_text()
+    quality = (ROOT / 'src/04_quality_gate.py').read_text()
+    assert 'poll_run_id' in bronze and 'poll_run_id' in quality
+    assert bronze.index('raw.count() < 1') < bronze.index('CREATE SCHEMA IF NOT EXISTS')
+    assert 'bronze_silver_' in quality
+    assert 'poll_snapshot_matches_' in quality
+    for mart in ('product_reference_summary', 'product_reaction_associations',
+                 'frequency_mix', 'source_flags_mix', 'chemical_evidence_summary',
+                 'narrative_label_summary'):
+        assert mart in quality
