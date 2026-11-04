@@ -1,6 +1,6 @@
 # DrugSafety360 — Cell-by-Cell Notebook Walkthrough
 
-This guide follows the exact `# COMMAND ----------` cell boundaries of the six source notebooks under `src/`. In a Databricks Git folder, `# MAGIC %md` sections appear as explanatory Markdown cells. The real Spark runtime is needed for actual table writes; Python syntax and GitHub CI alone are not equivalent.
+This guide follows the `# COMMAND ----------` boundaries in the six source notebooks under `src/`. Each numbered **code step** is a Python cell **preceded by a separate Markdown explanation cell**. Therefore, code step 1 is the *second physical notebook cell*, code step 2 is the fourth, and so on; the guide's numbers do **not** correspond to the full Databricks cell index. CI exercises these code cells with synthetic Spark data but cannot validate real Databricks permissions or Delta writes.
 
 ## Notebook 00_source_preflight.py — start here
 

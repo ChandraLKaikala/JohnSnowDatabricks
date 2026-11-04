@@ -21,7 +21,7 @@ This document covers likely runtime failures without claiming all possible error
 ## Checks available before Databricks runtime
 - `python -m pip install pytest PyYAML`
 - `python -m pytest tests -q`
-- GitHub Actions executes the same static contract checks.
+- GitHub Actions also runs the real notebook Python transformations on synthetic PySpark DataFrames; `saveAsTable` is intercepted to simulate isolated owned-table writes. This **does not** verify Delta transaction or Unity Catalog behavior.
 
 ## Checks required in Databricks
 - Source preflight succeeds and provider license permits replication.

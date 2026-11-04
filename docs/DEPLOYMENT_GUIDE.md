@@ -5,7 +5,8 @@
 - Permission to create schemas/tables in the `workspace` catalog; serverless notebook/Job compute must be enabled for your workspace.
 - Review the John Snow Labs Marketplace license for rights to create copied derived Delta tables. **Do not run ingestion before approval under the actual terms.**
 - GitHub account and Databricks Git-folder access to https://github.com/ChandraLKaikala/JohnSnowDatabricks.
-- To deploy Asset Bundles: current authenticated Databricks CLI on your own machine/CI runner (Git folder itself is only a code sync, not bundle deployment).
+- **Preferred:** Databricks bundle editor in the Git folder, which can validate, deploy and run the bundle without a local CLI (requires workspace files and serverless capabilities).
+- **Alternative:** current authenticated Databricks CLI on your machine/CI runner. Simply cloning a Git folder does not automatically deploy the bundle.
 
 ## 1. Put the code in its OWN Databricks folder
 1. Open Databricks → Workspace → your user home.
@@ -28,14 +29,30 @@ After verifying copying is permitted, run **one at a time**:
 
 Check `target_catalog` widget is `workspace`. Never set it to the provider's read-only Marketplace catalog.
 
-## 4. Asset Bundle deployment (managed Job)
-From the cloned repository root on a machine with the **Databricks CLI** authenticated to the correct workspace:
-- `databricks auth describe` — verify current workspace and identity (do not share tokens).
-- `databricks bundle validate -t dev` — validate resource and file references against your workspace.
-- `databricks bundle deploy -t dev` — uploads code and registers the Job.
-- `databricks bundle run drugsafety360_refresh -t dev` — runs 4 dependent notebook tasks.
+## 4. Deploy the bundle (managed serverless Job)
 
-The schedule stays **PAUSED** until a clean end-to-end run is verified. This is an explicit design choice for Free Edition compute quotas and historical data.
+### Option A — Databricks workspace editor (recommended; no CLI installation)
+
+1. In Workspace, navigate to your `DrugSafety360` **Git folder** on `main`.
+2. Since `databricks.yml` is at the repository root, Databricks can recognize it as a Declarative Automation Bundle. Choose **Open in editor** for the bundle/Git folder.
+3. Open the **Deployments** pane; under Targets select **dev**.
+4. Click **Deploy**, inspect the validation and proposed resource changes, and confirm **Deploy**.
+5. Under **Bundle resources**, find the `drugsafety360_refresh` Job and click **Run** / the play control.
+6. Monitor all four tasks: Bronze → Silver → Gold → Quality. Verify real tables and quality logs before you enable its intentionally paused schedule.
+
+The bundle root uses the standard user-owned `/Workspace/Users/<user>/.bundle/drugsafety360_jsl/dev` path for **deployed artifacts**, separate from `/Workspace/Users/<user>/DrugSafety360` (Git checkout). Do not manually copy generated `.bundle` files into your Git folder.
+
+Databricks official guide: https://docs.databricks.com/aws/en/dev-tools/bundles/workspace-tutorial
+
+### Option B — Authenticated Databricks CLI
+
+From a **local clone** of the repository (not the Databricks browser SQL editor):
+- `databricks auth describe` — verify workspace and identity, never share tokens.
+- `databricks bundle validate -t dev` — validate configuration against the target workspace.
+- `databricks bundle deploy -t dev` — deploy code and Job.
+- `databricks bundle run drugsafety360_refresh -t dev` — run four dependent tasks.
+
+The schedule stays **PAUSED** until a clean end-to-end run is verified. This is intentional for Free Edition compute quotas and static/historical provider data.
 
 ## 5. Verify real tables; do not trust only the UI
 In Databricks SQL, run:
@@ -64,4 +81,4 @@ Only after Gold tables exist and pass quality checks, create or edit an AI/BI da
 - Cleanup requires a *separate* reviewed inventory and dependencies. **Never drop CareFlow360, Retail-AI, Lakeflow-managed materialization objects, or the Marketplace source as part of this project.**
 
 ## 8. Zero-error caveat
-CI checks Python syntax, metadata and notebook structure; only actual Databricks execution tests account permissions, SQL runtime behavior, quotas and provider licensing. If a run fails, save the failing task name, error text and run ID (redact secrets/PII), then follow `docs/TROUBLESHOOTING.md`.
+CI checks Python syntax and configuration, and exercises notebook transformations using local PySpark with a simulated table writer. It does not run Databricks Delta/Unity Catalog writes, bundle deployment, permissions, quotas, or provider licensing checks. If a run fails, save the failing task name, error text and run ID (redact secrets/PII), then follow `docs/TROUBLESHOOTING.md`.

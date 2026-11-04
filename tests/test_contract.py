@@ -22,7 +22,9 @@ def test_asset_bundle_references():
     bundle = yaml.safe_load((ROOT / "databricks.yml").read_text())
     job = yaml.safe_load((ROOT / "resources/job.yml").read_text())["resources"]["jobs"]["drugsafety360_refresh"]
     assert bundle["bundle"]["name"] == "drugsafety360_jsl"
-    assert "DrugSafety360" in bundle["targets"]["dev"]["workspace"]["root_path"]
+    deployment_root = bundle["targets"]["dev"]["workspace"]["root_path"]
+    assert "/.bundle/" in deployment_root
+    assert "/DrugSafety360/.bundle/" not in deployment_root
     assert job["max_concurrent_runs"] == 1
     assert job["schedule"]["pause_status"] == "PAUSED"
     assert len(job["tasks"]) == 4

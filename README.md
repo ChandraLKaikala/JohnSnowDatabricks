@@ -36,12 +36,13 @@ A serverless four-task Databricks Job runs **Bronze → Silver → Gold → Qual
 - `sql/read_only_source_validation.sql`: source SQL checks.
 - `sql/post_deployment_validation.sql`: read-only Silver/Gold/quality reconciliation to run after first deployment.
 - `dashboards/jsl_source_explorer.lvdash.json`: serialized *source-data* AI/BI dashboard exported from the connected Databricks draft (3 pages, 17 widgets; importing this file does not automatically publish or execute it).
-- `tests/test_contract.py` + `.github/workflows/static-checks.yml`: static syntax/config assertions.
+- `tests/test_contract.py` + `tests/test_spark_pipeline.py` + `.github/workflows/static-checks.yml`: source-format/bundle contract tests and **synthetic PySpark execution of notebook transformations**. Spark tests simulate owned-table writes in memory; they do not test Databricks Delta/Unity Catalog I/O.
 - `docs/CELL_BY_CELL.md`: **cell-by-cell explanations** matching each notebook's explicit `# COMMAND ----------` boundaries.
 - `docs/ARCHITECTURE.md`: detailed design and governance explanation.
-- `docs/DEPLOYMENT_GUIDE.md`: exact Git-folder and CLI workflows, verification and rollback.
+- `docs/DEPLOYMENT_GUIDE.md`: deployment **directly from the Databricks Git-folder bundle editor** or from a separate authenticated CLI, verification and rollback.
 - `docs/DATA_DICTIONARY.md`: source-to-target lineage.
 - `docs/WORKSPACE_CLEANUP.md`: cautious audit plan for existing projects.
+- `docs/CODE_REVIEW.md`: verified corrections and remaining runtime test limitations.
 - `docs/TROUBLESHOOTING.md`: error cases and remediations.
 - `PRESENTATION.md`: presentation-ready Markdown slides, narrative and demo agenda.
 
@@ -50,11 +51,9 @@ A serverless four-task Databricks Job runs **Bronze → Silver → Gold → Qual
 1. In Databricks, create a **Git folder** under your user home named `DrugSafety360`; choose **GitHub** and repository URL: https://github.com/ChandraLKaikala/JohnSnowDatabricks . Select the repository default branch (`main`).
 2. Open the Git folder and verify `src`, `docs`, `resources`, `sql`, and `databricks.yml` are visible. The Python files use Databricks notebook-source markers; open each under `src` as notebooks.
 3. **Before any write**, run `src/00_source_preflight.py`. Review the provider's Marketplace terms, especially whether downstream copying into owned Delta tables is permitted.
-4. To create **managed scheduled orchestration**, use an authenticated Databricks CLI on your machine or a secure CI runner:
-   - `databricks bundle validate -t dev`
-   - `databricks bundle deploy -t dev`
-   - `databricks bundle run drugsafety360_refresh -t dev`
-5. Verify the actual tables exist and quality checks pass. Only then consider enabling the schedule. **Git-folder sync alone does not create tables, run notebooks, or deploy Jobs.**
+4. **Preferred (no local CLI required):** open the Git folder in the Databricks **bundle editor** (it is recognized by root `databricks.yml`), choose the **Deployments** panel, select `dev`, click **Deploy** and confirm, then run the generated `drugsafety360_refresh` Job. The editor requires workspace-file support and serverless permissions; see `docs/DEPLOYMENT_GUIDE.md`.
+5. **Alternative CLI:** `databricks bundle validate -t dev`, `databricks bundle deploy -t dev`, `databricks bundle run drugsafety360_refresh -t dev`.
+6. Verify the actual tables exist and quality checks pass. Only then consider enabling the schedule. **Git-folder sync alone does not create tables, run notebooks, or deploy Jobs.**
 6. Do not import this project into your CareFlow360 or Retail-AI directories. This is a **third independent project**.
 
 A manual alternative is to run the notebook sequence from the Git folder (Bronze, Silver, Gold, Quality). Manual notebook execution is not the same as deploying the Asset Bundle Job.
@@ -70,6 +69,6 @@ A manual alternative is to run the notebook sequence from the Git folder (Bronze
 
 ## Review and limitations
 
-The repository's static checks parse notebook Python, validate YAML, source references and intended isolation, and check that documentation maps to notebook cell boundaries. **Databricks runtime Spark, permissions, license terms, cluster/serverless availability, actual Git-folder rendering and dashboard widget execution still require validation in your workspace.** No one can truthfully promise zero execution errors without that environment test.
+The repository's checks parse notebook Python, validate YAML and isolation contracts, and **run notebook transformations using local PySpark with synthetic source rows and an in-memory replacement for table writes**. This does not perform real Databricks Delta/Unity Catalog writes or Databricks Asset Bundle validation. **Workspace permissions, provider terms, runtime availability, Delta sink behavior, actual job scheduling and dashboard rendering still require validation in your workspace.** No one can truthfully promise zero execution errors without that environment test.
 
 See [DEPLOYMENT_GUIDE](docs/DEPLOYMENT_GUIDE.md), [CELL_BY_CELL](docs/CELL_BY_CELL.md), [ARCHITECTURE](docs/ARCHITECTURE.md) and [PRESENTATION](PRESENTATION.md).
