@@ -79,10 +79,10 @@ This guide follows the `# COMMAND ----------` boundaries in the six source noteb
 
 ## Notebook 02_silver_standardize.py — Normalized Silver plus quarantine
 
-### Cell 1 — Select latest snapshots
+### Cell 1 — Resolve the latest completed poll manifest
 - Validates writable catalog, creates only `workspace.drugsafety360_silver`.
-- `latest()` selects the latest snapshot ID rather than blindly reading all historical Bronze rows.
-- `publish()` overwrites each **project-owned** current Silver table only.
+- Reads `workspace.drugsafety360_ops.ingestion_log`, identifies the last complete three-source `poll_run_id`, and uses its recorded snapshot IDs. Validates all three committed Bronze snapshots **before** overwriting any Silver table. Newer unlogged/orphaned Bronze snapshots are excluded.
+- `publish()` overwrites each **project-owned** current Silver table only. Every output retains `source_snapshot_id` so the quality gate can prove the source generation, even when row counts match.
 
 ### Cell 2 — Product–reaction reference
 - Renames source columns into consistent snake_case.

@@ -66,7 +66,7 @@ SELECT * FROM workspace.drugsafety360_gold.executive_metrics;
 SELECT * FROM workspace.drugsafety360_ops.quality_check_log ORDER BY run_at DESC LIMIT 30;
 ```
 
-Re-run Bronze on unchanged data and confirm the poll log says `changed=false` and that Bronze snapshot count is unchanged. Verify accepted + quarantined ADR rows reconcile with the latest source snapshot; source contents may change.
+Re-run Bronze on unchanged data and confirm the poll log says `changed=false` and that Bronze snapshot count is unchanged. Verify accepted + quarantined ADR rows reconcile with the **latest completed ingestion poll's committed ADR snapshot ID**, not an unlogged newer Bronze snapshot; source contents may change.
 
 ## 6. Dashboard
 The existing Databricks `DrugSafety360 — John Snow Labs Source Explorer [Medallion Pending]` was created through the connected AI/BI dashboard API and currently queries the **provider tables directly**. It is NOT a Gold-layer dashboard. Its widget definition was saved/read back, but not end-to-end visually executed.

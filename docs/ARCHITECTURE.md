@@ -60,7 +60,7 @@ A source table is not a Kafka topic. There is no dependable event ID in the veri
 This design is **idempotent for unchanged source** in sequential runs. It is not transactional across all three sources; concurrent writers should be disabled. Full snapshot polling is finite-cost but not strictly incremental.
 
 ## Silver semantics
-Silver current tables use the newest Bronze snapshot. Only accepted ADR rows with product and reaction terms enter the current table; invalid rows are in the quarantine table. Row duplicates may reflect repeated label associations, so do not deduplicate blindly. Null age, gender, and frequency values are expected labels, not automatically corrupt records. Carefully distinguish coding fields:
+Silver current tables use the **last completed three-source ingestion poll's manifest**, not the newest raw Bronze snapshot. A failed ingestion may append one Bronze table without committing a complete poll; newer unlogged data are kept for recovery but never used by Silver. Only accepted ADR rows with product and reaction terms enter the current table; invalid rows are in the quarantine table. Row duplicates may reflect repeated label associations, so do not deduplicate blindly. Null age, gender, and frequency values are expected labels, not automatically corrupt records. Carefully distinguish coding fields:
 - `MedDRA_PT_Code`: preferred-term code (int)
 - `MedDRA_SOC_Code`: system organ class code (int)
 - `Date_Of_Most_Recent_SPC`: label date (DATE)
@@ -95,7 +95,7 @@ For Free Edition keep costs bounded: one job run at once, no simultaneous tasks,
 - Ingestion: compare hash counts, refuse empty sources, append poll log.
 - Silver: quarantine missing ADR product/reaction, preserve provenance hashes.
 - Gold: descriptive aggregates and timestamped computation.
-- Quality gate: check all three Bronze-to-Silver count reconciliations, the latest completed poll's snapshot lineage and all seven Gold-to-Silver reference/annotation count reconciliations.
+- Quality gate: check the committed poll's Bronze-to-Silver counts, verify `source_snapshot_id` on each nonempty Silver output (not only record counts), and reconcile all seven Gold marts to Silver.
 - Limitations: no automated medical/coding validation, no source SLA, no reliable source event-time latency measure, no regulatory compliance certification.
 
 ## Existing-workspace cleanup isolation

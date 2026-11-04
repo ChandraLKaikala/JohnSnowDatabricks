@@ -64,3 +64,12 @@ The earlier CI did NOT test failures caused by an unreadable third source, nor d
 - Synthetic PySpark CI injects an unreadable third source after adding a source row and verifies no Bronze/log writes; it also truncates a Gold mart and requires an explicit logged quality failure.
 
 **Still not guaranteed:** multi-table ACID atomicity, licensed copying rights, real Delta/Unity Catalog writes, Databricks job deployment, or quota availability. Do not call the pipeline production-ready solely because CI is green.
+
+
+## Committed-poll consistency fix — November 2026
+
+**Confirmed logic bug:** Silver formerly selected each source's latest Bronze timestamp. If a later multi-source ingestion failed mid-run, that could mix an unlogged newly appended Bronze table with older data. Prior quality tests could detect a mismatch after the fact, but the Silver write had already occurred.
+
+**Correction:** Silver requires a three-source completed ingestion-log poll and resolves the exact logged snapshot ID per source. It checks all three snapshots before overwriting Silver and propagates `source_snapshot_id` into each Silver output. Quality validates the same completed poll, verifies every nonempty Silver output has the right snapshot ID (not just the right count), and reconciles all seven Gold marts.
+
+**Regression tests:** An artificial newer, unlogged Bronze snapshot must be ignored by Silver. A Silver table containing the same number of rows but a wrong snapshot ID must trigger a quality failure. These are local Spark tests with mocked storage; they do not prove transactional consistency of actual Delta writes or Databricks runtime deployment.

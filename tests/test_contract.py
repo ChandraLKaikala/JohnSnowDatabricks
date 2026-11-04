@@ -90,7 +90,10 @@ def test_reliability_contract_is_documented_and_enabled():
     assert 'poll_run_id' in bronze and 'poll_run_id' in quality
     assert bronze.index('raw.count() < 1') < bronze.index('CREATE SCHEMA IF NOT EXISTS')
     assert 'bronze_silver_' in quality
-    assert 'poll_snapshot_matches_' in quality
+    assert 'silver_snapshot_' in quality
+    silver = (ROOT / 'src/02_silver_standardize.py').read_text()
+    assert 'committed_poll_id' in silver and 'active_ids' in silver
+    assert 'source_snapshot_id' in silver and 'source_snapshot_id' in quality
     for mart in ('product_reference_summary', 'product_reaction_associations',
                  'frequency_mix', 'source_flags_mix', 'chemical_evidence_summary',
                  'narrative_label_summary'):

@@ -77,3 +77,8 @@ See [DEPLOYMENT_GUIDE](docs/DEPLOYMENT_GUIDE.md), [CELL_BY_CELL](docs/CELL_BY_CE
 ### Reliability corrections
 
 The latest audit adds all-source preflight before any Bronze writes, a poll-level run ID with real active snapshot IDs, full Bronze/Silver/Gold count reconciliation, and failure-path PySpark tests. See [CODE_REVIEW](docs/CODE_REVIEW.md). It still cannot guarantee atomic cross-table commits or runtime compatibility in your Databricks workspace.
+
+
+### Committed-snapshot protection
+
+Silver reads the last completed three-source Bronze ingestion **manifest**, not an unlogged newer Bronze snapshot from an interrupted run. Each Silver table carries its source snapshot ID, and the quality gate checks these IDs and row counts. See [CODE_REVIEW](docs/CODE_REVIEW.md). This does **not** turn cross-table overwrites into a single atomic transaction.
