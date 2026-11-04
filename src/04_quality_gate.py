@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # 04 — Quality gate: all layers, source lineage and row reconciliation
-# MAGIC **Cell 1:** Restrict writes to DrugSafety360 Ops. Define checks for Bronze source snapshots, Silver current tables and Gold aggregations. These are technical checks, not medical/regulatory certification.
+# MAGIC **Cell 1:** Resolve the last completed three-source poll, rather than trusting whichever Bronze snapshot was written most recently. Only committed snapshot IDs are eligible for reconciliation.
 
 # COMMAND ----------
 import re
@@ -27,18 +27,33 @@ def count_sum(table_fqn, value_col):
     result = spark.table(table_fqn).agg(F.sum(F.col(value_col)).alias("total")).first()
     return int(result["total"] or 0)
 
-def newest_bronze_snapshot(source_name):
+SOURCE_NAMES = ("adr_reference", "chemical_annotations", "narrative_labels")
+log = spark.table(f"{OPS}.ingestion_log").where(F.col("poll_run_id").isNotNull())
+polls = (log.groupBy("poll_run_id")
+         .agg(F.count("*").alias("entries"),
+              F.countDistinct("source_name").alias("unique_sources"),
+              F.max("checked_at").alias("at"))
+         .where((F.col("entries") == len(SOURCE_NAMES)) &
+                (F.col("unique_sources") == len(SOURCE_NAMES)))
+         .orderBy(F.desc("at"), F.desc("poll_run_id")).limit(1).collect())
+if not polls:
+    raise RuntimeError("No completed three-source ingestion poll; cannot validate Silver")
+committed_poll_id = polls[0]["poll_run_id"]
+poll_rows = log.where(F.col("poll_run_id") == F.lit(committed_poll_id)).collect()
+manifest = {row["source_name"]: row for row in poll_rows}
+if set(manifest) != set(SOURCE_NAMES) or any(not row["snapshot_id"] for row in manifest.values()):
+    raise RuntimeError("Completed poll has inconsistent source manifest")
+record("completed_poll_has_three_sources", len(poll_rows), len(poll_rows) == 3)
+
+def committed_bronze_snapshot(source_name):
+    source_id = manifest[source_name]["snapshot_id"]
     history = spark.table(f"{BRONZE}.{source_name}_snapshots")
-    versions = (history.groupBy("_snapshot_id").agg(F.max("_captured_at").alias("at"))
-                .orderBy(F.desc("at"), F.desc("_snapshot_id")).limit(1).collect())
-    if not versions:
-        raise RuntimeError(f"No Bronze snapshots for {source_name}")
-    version = versions[0]["_snapshot_id"]
-    return version, history.where(F.col("_snapshot_id") == F.lit(version))
+    return source_id, history.where(F.col("_snapshot_id") == F.lit(source_id))
+
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC **Cell 2:** Reconcile each latest Bronze snapshot to the corresponding Silver table. Accepted ADR rows plus quarantine must equal the source snapshot count. Verify no blank product/reaction in accepted Silver.
+# MAGIC **Cell 2:** Reconcile each COMMITTED Bronze snapshot to its Silver table, including quarantine. Compare source snapshot IDs to detect wrong-generation Silver data even when the row count matches.
 
 # COMMAND ----------
 adr = spark.table(f"{SILVER}.adr_reference_current")
@@ -53,11 +68,29 @@ silver_counts = {
 }
 latest_ids = {}
 for name in ("adr_reference", "chemical_annotations", "narrative_labels"):
-    snapshot_id, snapshot = newest_bronze_snapshot(name)
+    snapshot_id, snapshot = committed_bronze_snapshot(name)
     latest_ids[name] = snapshot_id
     source_rows = snapshot.count()
     record(f"bronze_silver_{name}_rows", abs(source_rows - silver_counts[name]),
            source_rows == silver_counts[name])
+    logged_rows = int(manifest[name]["source_rows"])
+    record(f"poll_source_count_{name}", abs(logged_rows - source_rows),
+           logged_rows == source_rows)
+
+# A same-size, wrong-generation Silver table is a serious silent data error.
+# Check its committed snapshot ID, not only its row count.
+for source_name, frames in (
+    ("adr_reference", (adr, quarantine)),
+    ("chemical_annotations", (chemical,)),
+    ("narrative_labels", (narrative,))
+):
+    expected_id = manifest[source_name]["snapshot_id"]
+    for index, frame in enumerate(frames):
+        ids = [r["source_snapshot_id"] for r in
+               frame.select("source_snapshot_id").distinct().limit(2).collect()]
+        # Empty quarantine is legitimate; other current tables must not be empty.
+        good = (not ids and source_name == "adr_reference" and index == 1) or ids == [expected_id]
+        record(f"silver_snapshot_{source_name}_{index}", int(good), good)
 
 for label, current_count in (
     ("adr_reference_current", adr.count()),
@@ -75,22 +108,10 @@ record("quarantine_rows_observed", quarantine.count(), True)
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC **Cell 3:** Compare latest completed three-source poll to actual Bronze snapshot IDs. Then reconcile the executive metrics and all SIX additional Gold outputs to their Silver input rows.
+# MAGIC **Cell 3:** Reconcile the executive metrics and all six other Gold marts to the Silver tables. Commit/poll lineage was checked before this step.
 
 # COMMAND ----------
-log = spark.table(f"{OPS}.ingestion_log")
-polls = (log.groupBy("poll_run_id").agg(F.max("checked_at").alias("at"))
-         .orderBy(F.desc("at"), F.desc("poll_run_id")).limit(1).collect())
-if not polls:
-    record("completed_poll_exists", 0, False)
-else:
-    poll_id = polls[0]["poll_run_id"]
-    poll_rows = log.where(F.col("poll_run_id") == F.lit(poll_id)).collect()
-    log_ids = {row["source_name"]: row["snapshot_id"] for row in poll_rows}
-    record("completed_poll_has_three_sources", len(poll_rows), len(poll_rows) == 3)
-    for name, expected_id in latest_ids.items():
-        record(f"poll_snapshot_matches_{name}", int(log_ids.get(name) == expected_id),
-               log_ids.get(name) == expected_id)
+# Poll provenance and Bronze/Silver snapshot IDs were verified in Cells 1–2.
 
 metrics = spark.table(f"{GOLD}.executive_metrics")
 metric_count = metrics.count()
