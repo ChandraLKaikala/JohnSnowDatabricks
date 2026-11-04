@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # 01 — Bronze: incremental-detection full snapshots
-# MAGIC **Cell 1:** Check the target catalog and create only isolated DrugSafety360 schemas. The Marketplace catalog stays read-only. Source data is historical: this is **scheduled snapshot polling**, not live streaming.
+# MAGIC **Cell 1:** Verify the writable catalog. Create isolated project schemas only AFTER checking all three source tables. Source data is historical, not live.
 
 # COMMAND ----------
 import re
@@ -16,8 +16,6 @@ if catalog != "workspace" or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog
 SOURCE = "john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction"
 BRONZE = f"{catalog}.drugsafety360_bronze"
 OPS = f"{catalog}.drugsafety360_ops"
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {BRONZE}")
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {OPS}")
 
 # COMMAND ----------
 # MAGIC %md
@@ -57,8 +55,7 @@ def latest_snapshot(table_fqn):
         return None
     return history.where(F.col("_snapshot_id") == F.lit(latest[0]["_snapshot_id"]))
 
-def has_changed(new_frame, target):
-    previous = latest_snapshot(target)
+def has_changed(new_frame, previous):
     if previous is None:
         return True
     new_counts = new_frame.groupBy("_record_hash").count().withColumnRenamed("count", "new_count")
@@ -69,52 +66,75 @@ def has_changed(new_frame, target):
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC **Cell 4:** Write a snapshot only when the source multiset changed. Refuse empty data and missing required columns. Keep a bounded audit trail: source name, source rows, snapshot ID and changed flag.
+# MAGIC **Cell 4:** Preflight and cache all three sources before writes. Changed multisets get new snapshots; unchanged sources retain their actual snapshot IDs. A poll_run_id groups the records. Multi-table writes are NOT atomic.
 
 # COMMAND ----------
+poll_run_id = str(uuid.uuid4())
+prepared = []
 run_log = []
-for logical_name, (physical_name, columns) in SOURCES.items():
-    source_fqn = f"{SOURCE}.{physical_name}"
-    target_fqn = f"{BRONZE}.{logical_name}_snapshots"
-    source_df = spark.table(source_fqn)
-    missing = sorted(set(columns) - set(source_df.columns))
-    if missing:
-        raise RuntimeError(f"Source schema changed in {source_fqn}: {missing}")
-    raw = source_df.select(*[F.col(name) for name in columns])
-    row_count = raw.count()
-    if row_count < 1:
-        raise RuntimeError(f"Empty source table {source_fqn}; refusing refresh")
-    canonical = F.to_json(
-        F.struct(*[F.col(name) for name in sorted(columns)]),
-        options={"ignoreNullFields": "false"}
-    )
-    hashed = raw.withColumn("_record_hash", F.sha2(canonical, 256))
-    changed = has_changed(hashed, target_fqn)
-    snapshot_id = "unchanged"
-    if changed:
-        snapshot_id = str(uuid.uuid4())
-        (hashed.withColumn("_snapshot_id", F.lit(snapshot_id))
-         .withColumn("_captured_at", F.current_timestamp())
-         .withColumn("_source_table", F.lit(source_fqn))
-         .write.format("delta").mode("append").option("mergeSchema", "true")
-         .saveAsTable(target_fqn))
-    run_log.append((logical_name, source_fqn, snapshot_id, int(row_count), changed))
-    print(f"{logical_name}: {row_count:,} rows; new_snapshot={changed}")
+try:
+    # Preflight ALL provider tables before ANY schema creation or writes.
+    # Cache selected source columns to stabilize this poll within Spark's cache guarantees.
+    for logical_name, (physical_name, columns) in SOURCES.items():
+        source_fqn = f"{SOURCE}.{physical_name}"
+        source_df = spark.table(source_fqn)
+        missing = sorted(set(columns) - set(source_df.columns))
+        if missing:
+            raise RuntimeError(f"Source schema changed in {source_fqn}: {missing}")
+        raw = source_df.select(*[F.col(name) for name in columns]).cache()
+        prepared.append((logical_name, source_fqn, columns, raw))
+        if raw.count() < 1:
+            raise RuntimeError(f"Empty source table {source_fqn}; refusing ALL writes")
+
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {BRONZE}")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {OPS}")
+
+    for logical_name, source_fqn, columns, raw in prepared:
+        target_fqn = f"{BRONZE}.{logical_name}_snapshots"
+        canonical = F.to_json(
+            F.struct(*[F.col(name) for name in sorted(columns)]),
+            options={"ignoreNullFields": "false"}
+        )
+        hashed = raw.withColumn("_record_hash", F.sha2(canonical, 256))
+        previous = latest_snapshot(target_fqn)
+        changed = has_changed(hashed, previous)
+
+        if changed:
+            active_snapshot_id = str(uuid.uuid4())
+            (hashed.withColumn("_snapshot_id", F.lit(active_snapshot_id))
+             .withColumn("_captured_at", F.current_timestamp())
+             .withColumn("_source_table", F.lit(source_fqn))
+             .write.format("delta").mode("append").option("mergeSchema", "true")
+             .saveAsTable(target_fqn))
+        else:
+            # An unchanged poll still references the real previous snapshot.
+            active_snapshot_id = previous.select("_snapshot_id").first()["_snapshot_id"]
+
+        source_rows = raw.count()
+        run_log.append((poll_run_id, logical_name, source_fqn,
+                        active_snapshot_id, int(source_rows), changed))
+        print(f"{logical_name}: rows={source_rows:,}; changed={changed}; snapshot={active_snapshot_id}")
+
+    # Log only a completed three-source snapshot loop (not a multi-table ACID commit).
+    log_schema = StructType([
+        StructField("poll_run_id", StringType()),
+        StructField("source_name", StringType()),
+        StructField("source_fqn", StringType()),
+        StructField("snapshot_id", StringType()),
+        StructField("source_rows", LongType()),
+        StructField("changed", BooleanType())
+    ])
+    (spark.createDataFrame(run_log, log_schema)
+     .withColumn("checked_at", F.current_timestamp())
+     .write.format("delta").mode("append").option("mergeSchema", "true")
+     .saveAsTable(f"{OPS}.ingestion_log"))
+finally:
+    for _, _, _, raw in prepared:
+        raw.unpersist()
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC **Cell 5:** Append the poll log. No CareFlow360, Retail-AI, or John Snow Labs source table is changed. A high-frequency schedule would consume quota without making historical source data live.
+# MAGIC **Cell 5:** Confirm the log was appended in Cell 4 and the cached inputs were released. No other project's data or John Snow Labs provider tables are modified.
 
 # COMMAND ----------
-log_schema = StructType([
-    StructField("source_name", StringType()),
-    StructField("source_fqn", StringType()),
-    StructField("snapshot_id", StringType()),
-    StructField("source_rows", LongType()),
-    StructField("changed", BooleanType())
-])
-(spark.createDataFrame(run_log, log_schema)
- .withColumn("checked_at", F.current_timestamp())
- .write.format("delta").mode("append").option("mergeSchema", "true")
- .saveAsTable(f"{OPS}.ingestion_log"))
 print("Bronze complete. Historical source snapshots, not real-time clinical events.")
