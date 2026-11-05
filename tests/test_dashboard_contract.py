@@ -118,5 +118,6 @@ def test_status_page_and_no_gold_or_patient_text_source_queries():
         " ".join(item["widget"].get("multilineTextboxSpec", {}).get("lines", []))
         for page in dash["pages"] for item in page["layout"]
     )
-    assert "NOT DEPLOYED" in text
+    assert "DEPLOYED (2026-11-05)" in text
+    assert "NOT DEPLOYED" not in text
     assert "patient" in text.lower()

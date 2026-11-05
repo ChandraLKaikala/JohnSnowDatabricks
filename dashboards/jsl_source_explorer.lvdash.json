@@ -39,7 +39,7 @@
             "multilineTextboxSpec": {
               "lines": [
                 "## DrugSafety360 — John Snow Labs | Verified source data\n",
-                "**SOURCE PREVIEW ONLY:** shared Marketplace catalog is queryable. Bronze/Silver/Gold tables and scheduled jobs are NOT deployed. Counts are reference-record/label associations, NOT reports, rates, patient incidence, or causal risk. SPC dates are label dates."
+                "**SOURCE EXPLORER (live Marketplace read):** queries the provider catalog directly. Medallion deployment VERIFIED 2026-11-05: `drugsafety360_bronze`/`_silver`/`_gold`/`_ops` tables and the paused `drugsafety360_refresh` job exist and pass 24/24 quality checks. Counts are reference-record/label associations, NOT reports, rates, patient incidence, or causal risk. SPC dates are label dates."
               ]
             }
           },
@@ -728,7 +728,7 @@
                 "\n",
                 "**VERIFIED:** Installed catalog `john_snow_labs_adverse_drug_and_product_reaction`, schema `drug_and_product_reaction`, and three readable source tables.\n",
                 "\n",
-                "**NOT DEPLOYED:** No `drugsafety360_bronze`, `drugsafety360_silver`, `drugsafety360_gold` or data-quality job resources have been created here. This assistant connection supports SQL/Genie reads and AI/BI dashboard management, not writing Unity Catalog objects or workspace notebook/job deployment.\n",
+                "**DEPLOYED (2026-11-05):** `drugsafety360_bronze`, `drugsafety360_silver`, `drugsafety360_gold` and `drugsafety360_ops` schemas exist with 16 Delta tables; the paused serverless job `drugsafety360_refresh` (job_id 121764449857357) ran Bronze → Silver → Gold → Quality successfully with 24/24 quality checks passed and an idempotent unchanged-source re-run (`changed=false` for all three sources).\n",
                 "\n",
                 "**Refresh semantics:** The provider sample is dated historical/reference data, not a Kafka/live adverse-event stream. Source changes could be detected on a scheduled batch poll, subject to provider updates and Free Edition quotas. Label date (`Date_Of_Most_Recent_SPC`) is NOT the adverse-event occurrence date.\n",
                 "\n",
