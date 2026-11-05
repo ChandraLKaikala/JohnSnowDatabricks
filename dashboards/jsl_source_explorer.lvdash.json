@@ -3,131 +3,23 @@
     {
       "name": "adr",
       "displayName": "JSL product-reaction reference",
-      "catalog": "john_snow_labs_adverse_drug_and_product_reaction",
-      "schema": "drug_and_product_reaction",
-      "config": {
-        "source": "john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction.adverse_reaction_with_preferred_term_and_system_organ_class_codes",
-        "measures": [
-          {
-            "name": "rows",
-            "expr": "COUNT(1)"
-          },
-          {
-            "name": "products",
-            "expr": "COUNT(DISTINCT Medicinal_Product)"
-          },
-          {
-            "name": "substances",
-            "expr": "COUNT(DISTINCT Active_Substance)"
-          },
-          {
-            "name": "reaction_terms",
-            "expr": "COUNT(DISTINCT Adverse_Drug_Reaction_Term)"
-          },
-          {
-            "name": "meddra_pts",
-            "expr": "COUNT(DISTINCT MedDRA_PT_Code)"
-          }
-        ],
-        "version": "1.1",
-        "comment": "Reference rows, NOT incident counts, causality proof or live adverse-event reports; Date_Of_Most_Recent_SPC is the label/SPC date.",
-        "dimensions": [
-          {
-            "name": "Is_Clinical_Trial",
-            "expr": "Is_Clinical_Trial"
-          },
-          {
-            "name": "Is_Post_Marketing_Surveillance",
-            "expr": "Is_Post_Marketing_Surveillance"
-          },
-          {
-            "name": "Is_Class_Warning",
-            "expr": "Is_Class_Warning"
-          },
-          {
-            "name": "Frequency",
-            "expr": "Frequency"
-          },
-          {
-            "name": "Causality",
-            "expr": "Causality"
-          },
-          {
-            "name": "Age_Group",
-            "expr": "Age_Group"
-          },
-          {
-            "name": "Gender",
-            "expr": "Gender"
-          }
-        ]
-      }
+      "queryLines": [
+        "SELECT `Medicinal_Product`, `Active_Substance`, `Adverse_Drug_Reaction_Term`, `MedDRA_PT_Code`, `Is_Clinical_Trial`, `Is_Post_Marketing_Surveillance`, `Is_Class_Warning`, `Frequency`, `Causality` FROM `john_snow_labs_adverse_drug_and_product_reaction`.`drug_and_product_reaction`.`adverse_reaction_with_preferred_term_and_system_organ_class_codes`"
+      ]
     },
     {
       "name": "chemicals",
       "displayName": "JSL chemical-disease evidence",
-      "catalog": "john_snow_labs_adverse_drug_and_product_reaction",
-      "schema": "drug_and_product_reaction",
-      "config": {
-        "source": "john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction.chemicals_contributing_to_disease",
-        "measures": [
-          {
-            "name": "relations",
-            "expr": "COUNT(1)"
-          },
-          {
-            "name": "distinct_chemicals",
-            "expr": "COUNT(DISTINCT Chemical_Id)"
-          },
-          {
-            "name": "distinct_diseases",
-            "expr": "COUNT(DISTINCT Disease_Id)"
-          }
-        ],
-        "version": "1.1",
-        "comment": "Literature-annotated relations, not clinical causality or observed incident counts.",
-        "dimensions": [
-          {
-            "name": "Patient_Relation_Type",
-            "expr": "Patient_Relation_Type"
-          },
-          {
-            "name": "Patient_Relation_Type_Verification",
-            "expr": "Patient_Relation_Type_Verification"
-          }
-        ]
-      }
+      "queryLines": [
+        "SELECT `Chemical_Id`, `Disease_Id`, `Patient_Relation_Type`, `Patient_Relation_Type_Verification` FROM `john_snow_labs_adverse_drug_and_product_reaction`.`drug_and_product_reaction`.`chemicals_contributing_to_disease`"
+      ]
     },
     {
       "name": "narrative_relations",
       "displayName": "JSL patient narrative relation labels",
-      "catalog": "john_snow_labs_adverse_drug_and_product_reaction",
-      "schema": "drug_and_product_reaction",
-      "config": {
-        "source": "john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction.drug_relationship_database",
-        "measures": [
-          {
-            "name": "relations",
-            "expr": "COUNT(1)"
-          },
-          {
-            "name": "documents",
-            "expr": "COUNT(DISTINCT Document_Id)"
-          }
-        ],
-        "version": "1.1",
-        "comment": "Aggregated relationship labels only. Do not expose Remarks_by_Patient: free text may include personal data.",
-        "dimensions": [
-          {
-            "name": "Patient_Relation_Type",
-            "expr": "Patient_Relation_Type"
-          },
-          {
-            "name": "Patient_Relation_Description",
-            "expr": "Patient_Relation_Description"
-          }
-        ]
-      }
+      "queryLines": [
+        "SELECT `Document_Id`, `Patient_Relation_Type`, `Patient_Relation_Description` FROM `john_snow_labs_adverse_drug_and_product_reaction`.`drug_and_product_reaction`.`drug_relationship_database`"
+      ]
     }
   ],
   "pages": [
@@ -162,8 +54,8 @@
                   "datasetName": "adr",
                   "fields": [
                     {
-                      "name": "measure(rows)",
-                      "expression": "MEASURE(`rows`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -179,12 +71,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "measure(rows)",
-                  "rowNumber": 0
+                  "fieldName": "count(*)"
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -205,8 +93,8 @@
                   "datasetName": "adr",
                   "fields": [
                     {
-                      "name": "measure(products)",
-                      "expression": "MEASURE(`products`)"
+                      "name": "countdistinct(Medicinal_Product)",
+                      "expression": "COUNT(DISTINCT `Medicinal_Product`)"
                     }
                   ],
                   "disaggregated": false
@@ -222,12 +110,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "measure(products)",
-                  "rowNumber": 0
+                  "fieldName": "countdistinct(Medicinal_Product)"
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -248,8 +132,8 @@
                   "datasetName": "adr",
                   "fields": [
                     {
-                      "name": "measure(substances)",
-                      "expression": "MEASURE(`substances`)"
+                      "name": "countdistinct(Active_Substance)",
+                      "expression": "COUNT(DISTINCT `Active_Substance`)"
                     }
                   ],
                   "disaggregated": false
@@ -265,12 +149,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "measure(substances)",
-                  "rowNumber": 0
+                  "fieldName": "countdistinct(Active_Substance)"
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -291,8 +171,8 @@
                   "datasetName": "adr",
                   "fields": [
                     {
-                      "name": "measure(reaction_terms)",
-                      "expression": "MEASURE(`reaction_terms`)"
+                      "name": "countdistinct(Adverse_Drug_Reaction_Term)",
+                      "expression": "COUNT(DISTINCT `Adverse_Drug_Reaction_Term`)"
                     }
                   ],
                   "disaggregated": false
@@ -308,12 +188,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "measure(reaction_terms)",
-                  "rowNumber": 0
+                  "fieldName": "countdistinct(Adverse_Drug_Reaction_Term)"
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -338,8 +214,8 @@
                       "expression": "`Is_Clinical_Trial`"
                     },
                     {
-                      "name": "measure(rows)",
-                      "expression": "MEASURE(`rows`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -362,15 +238,12 @@
                   }
                 },
                 "y": {
-                  "fieldName": "measure(rows)",
+                  "fieldName": "count(*)",
                   "displayName": "rows",
                   "scale": {
                     "type": "quantitative"
                   }
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -395,8 +268,8 @@
                       "expression": "`Is_Post_Marketing_Surveillance`"
                     },
                     {
-                      "name": "measure(rows)",
-                      "expression": "MEASURE(`rows`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -419,15 +292,12 @@
                   }
                 },
                 "y": {
-                  "fieldName": "measure(rows)",
+                  "fieldName": "count(*)",
                   "displayName": "rows",
                   "scale": {
                     "type": "quantitative"
                   }
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -452,8 +322,8 @@
                       "expression": "`Is_Class_Warning`"
                     },
                     {
-                      "name": "measure(rows)",
-                      "expression": "MEASURE(`rows`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -476,15 +346,12 @@
                   }
                 },
                 "y": {
-                  "fieldName": "measure(rows)",
+                  "fieldName": "count(*)",
                   "displayName": "rows",
                   "scale": {
                     "type": "quantitative"
                   }
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -509,8 +376,8 @@
                       "expression": "`Frequency`"
                     },
                     {
-                      "name": "measure(rows)",
-                      "expression": "MEASURE(`rows`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -533,15 +400,12 @@
                   }
                 },
                 "y": {
-                  "fieldName": "measure(rows)",
+                  "fieldName": "count(*)",
                   "displayName": "rows",
                   "scale": {
                     "type": "quantitative"
                   }
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -587,8 +451,8 @@
                   "datasetName": "chemicals",
                   "fields": [
                     {
-                      "name": "measure(relations)",
-                      "expression": "MEASURE(`relations`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -604,12 +468,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "measure(relations)",
-                  "rowNumber": 0
+                  "fieldName": "count(*)"
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -630,8 +490,8 @@
                   "datasetName": "chemicals",
                   "fields": [
                     {
-                      "name": "measure(distinct_chemicals)",
-                      "expression": "MEASURE(`distinct_chemicals`)"
+                      "name": "countdistinct(Chemical_Id)",
+                      "expression": "COUNT(DISTINCT `Chemical_Id`)"
                     }
                   ],
                   "disaggregated": false
@@ -647,12 +507,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "measure(distinct_chemicals)",
-                  "rowNumber": 0
+                  "fieldName": "countdistinct(Chemical_Id)"
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -673,8 +529,8 @@
                   "datasetName": "chemicals",
                   "fields": [
                     {
-                      "name": "measure(distinct_diseases)",
-                      "expression": "MEASURE(`distinct_diseases`)"
+                      "name": "countdistinct(Disease_Id)",
+                      "expression": "COUNT(DISTINCT `Disease_Id`)"
                     }
                   ],
                   "disaggregated": false
@@ -690,12 +546,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "measure(distinct_diseases)",
-                  "rowNumber": 0
+                  "fieldName": "countdistinct(Disease_Id)"
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -716,8 +568,8 @@
                   "datasetName": "narrative_relations",
                   "fields": [
                     {
-                      "name": "measure(relations)",
-                      "expression": "MEASURE(`relations`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -733,12 +585,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "measure(relations)",
-                  "rowNumber": 0
+                  "fieldName": "count(*)"
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -763,8 +611,8 @@
                       "expression": "`Patient_Relation_Type`"
                     },
                     {
-                      "name": "measure(relations)",
-                      "expression": "MEASURE(`relations`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -787,15 +635,12 @@
                   }
                 },
                 "y": {
-                  "fieldName": "measure(relations)",
+                  "fieldName": "count(*)",
                   "displayName": "relations",
                   "scale": {
                     "type": "quantitative"
                   }
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
@@ -820,8 +665,8 @@
                       "expression": "`Patient_Relation_Description`"
                     },
                     {
-                      "name": "measure(relations)",
-                      "expression": "MEASURE(`relations`)"
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
                     }
                   ],
                   "disaggregated": false
@@ -844,15 +689,12 @@
                   }
                 },
                 "y": {
-                  "fieldName": "measure(relations)",
+                  "fieldName": "count(*)",
                   "displayName": "relations",
                   "scale": {
                     "type": "quantitative"
                   }
                 }
-              },
-              "data": {
-                "queryName": "main_query"
               }
             }
           },
