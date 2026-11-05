@@ -1,5 +1,7 @@
 from pathlib import Path
 import ast
+import re
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,11 +65,22 @@ def test_cleanup_notebook_never_modifies_workspace():
 def test_documentation_and_no_secrets():
     for path in ("PRESENTATION.md", "docs/CELL_BY_CELL.md", "docs/ARCHITECTURE.md", "docs/DEPLOYMENT_GUIDE.md"):
         assert (ROOT / path).is_file()
+    # Review round 2: asserting on ONE hardcoded example string gives false
+    # confidence (the string can never appear in the repo). Scan every text
+    # asset for REALISTIC credential/token shapes instead.
+    token_patterns = [
+        r"dapi[0-9a-f]{28,}",           # Databricks PAT
+        r"jdbc:postgresql://[^\s]*:[^\s*@]+@",  # URL-embedded password
+        r"(?i)(api[_-]?key|secret[_-]?access[_-]?key)\s*[:=]\s*['\"][^'\"]{8,}",
+        r"AKIA[0-9A-Z]{16}",             # AWS access key id
+        r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----",
+    ]
     for path in ROOT.rglob("*"):
-        if path.is_file() and not str(path).endswith(".pyc"):
-            if path.suffix in (".py", ".yml", ".yaml", ".md", ".sql"):
-                content = path.read_text(encoding="utf-8")
-                assert "dapi" + "012345" not in content
+        if path.is_file() and path.suffix in (".py", ".yml", ".yaml", ".md", ".sql"):
+            content = path.read_text(encoding="utf-8")
+            for pattern in token_patterns:
+                assert not re.search(pattern, content), \
+                    f"{path}: content matches credential pattern {pattern!r}"
 
 
 def test_post_deployment_sql_is_read_only():
@@ -104,13 +117,20 @@ def test_notebooks_pin_utc_timezone_and_normalize_types():
     for name in ("01_bronze_ingest.py", "02_silver_standardize.py",
                  "03_gold_analytics.py", "04_quality_gate.py"):
         tree = ast.parse((ROOT / "src" / name).read_text(encoding="utf-8"))
-        conf_sets = [node.args[0].value for node in ast.walk(tree)
-                     if isinstance(node, ast.Call)
-                     and isinstance(node.func, ast.Attribute)
-                     and node.func.attr == "set" and node.args
-                     and isinstance(node.args[0], ast.Constant)]
-        assert "spark.sql.session.timeZone" in conf_sets, \
-            f"{name} does not pin spark.sql.session.timeZone to UTC"
+        # Assert the (key, value) PAIR, not just that the key is mentioned:
+        # a conf.set('spark.sql.session.timeZone', 'Europe/Paris') or a key
+        # in a comment must not pass (review round 2).
+        utc_sets = [node for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "set" and len(node.args) >= 2
+                    and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value == "spark.sql.session.timeZone"]
+        assert utc_sets, f"{name} never sets spark.sql.session.timeZone"
+        for call in utc_sets:
+            value = call.args[1].value if isinstance(call.args[1], ast.Constant) else None
+            assert isinstance(call.args[1], ast.Constant) and value == "UTC", \
+                f"{name} must pin spark.sql.session.timeZone to the literal 'UTC' (found {value!r})"
     silver = ast.parse((ROOT / "src/02_silver_standardize.py").read_text(encoding="utf-8"))
     casts = [node.args[0].value for node in ast.walk(silver)
              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)

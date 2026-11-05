@@ -81,71 +81,121 @@ def has_changed(new_frame, previous):
 
 # COMMAND ----------
 
-# DBTITLE 1,Add poll_complete transaction flag to ingestion log
+# DBTITLE 1,Operational log: context, early failures, poll hand-off
 poll_run_id = str(uuid.uuid4())
 prepared = []
 run_log = []
-# Preflight ALL provider tables before ANY schema creation or writes.
-# NOTE: do not add df.cache()/df.persist()/df.unpersist() here; Databricks
-# serverless runtimes reject them (CACHE_REQUIRES_NEWER_CLIENT_ON_SERVERLESS_GC).
-for logical_name, (physical_name, columns) in SOURCES.items():
-    source_fqn = f"{SOURCE}.{physical_name}"
-    source_df = spark.table(source_fqn)
-    missing = sorted(set(columns) - set(source_df.columns))
-    if missing:
-        raise RuntimeError(f"Source schema changed in {source_fqn}: {missing}")
-    raw = source_df.select(*[F.col(name) for name in columns])
-    prepared.append((logical_name, source_fqn, columns, raw))
-    if raw.count() < 1:
-        raise RuntimeError(f"Empty source table {source_fqn}; refusing ALL writes")
 
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {BRONZE}")
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {OPS}")
+# Job/run linkage for the operational log (earlier review finding): every log
+# row records the Job run that produced it. Empty outside a Job context
+# (interactive runs and tests), which is expected.
+try:
+    from dbruntime.databricks_repl_context import get_context as _get_ctx
+    JOB_RUN_ID = str(getattr(_get_ctx(), "jobRunId", "") or "")
+except Exception:
+    JOB_RUN_ID = ""
 
-for logical_name, source_fqn, columns, raw in prepared:
-    target_fqn = f"{BRONZE}.{logical_name}_snapshots"
-    canonical = F.to_json(
-        F.struct(*[F.col(name) for name in sorted(columns)]),
-        options={"ignoreNullFields": "false"}
-    )
-    hashed = raw.withColumn("_record_hash", F.sha2(canonical, 256))
-    previous = latest_snapshot(target_fqn)
-    changed = has_changed(hashed, previous)
-
-    if changed:
-        active_snapshot_id = str(uuid.uuid4())
-        (hashed.withColumn("_snapshot_id", F.lit(active_snapshot_id))
-         .withColumn("_captured_at", F.current_timestamp())
-         .withColumn("_source_table", F.lit(source_fqn))
-         .write.format("delta").mode("append").option("mergeSchema", "true")
-         .saveAsTable(target_fqn))
-    else:
-        # An unchanged poll still references the real previous snapshot.
-        active_snapshot_id = previous.select("_snapshot_id").first()["_snapshot_id"]
-
-    source_rows = raw.count()
-    run_log.append((poll_run_id, logical_name, source_fqn,
-                    active_snapshot_id, int(source_rows), changed))
-    print(f"{logical_name}: rows={source_rows:,}; changed={changed}; snapshot={active_snapshot_id}")
-
-# Log only a completed three-source snapshot loop (not a multi-table ACID commit).
 log_schema = StructType([
     StructField("poll_run_id", StringType()),
     StructField("source_name", StringType()),
     StructField("source_fqn", StringType()),
     StructField("snapshot_id", StringType()),
     StructField("source_rows", LongType()),
-    StructField("changed", BooleanType())
+    StructField("changed", BooleanType()),
+    StructField("status", StringType()),
+    StructField("error_message", StringType()),
+    StructField("job_run_id", StringType()),
 ])
-# Explicit transaction flag (review remediation): these rows are written ONLY
-# after all three source snapshot writes finished. poll_complete=True marks a
-# finished poll; a run that dies mid-loop leaves no flag row, so partial polls
-# are detectable downstream by Silver and the quality gate.
-(spark.createDataFrame(run_log, log_schema)
- .withColumn("poll_complete", F.lit(True))
- .withColumn("checked_at", F.current_timestamp())
- .write.format("delta").mode("append").option("mergeSchema", "true")
- .saveAsTable(f"{OPS}.ingestion_log"))
+
+def append_log(rows, complete):
+    frame = (spark.createDataFrame(rows, log_schema)
+             .withColumn("poll_complete", F.lit(complete))
+             .withColumn("checked_at", F.current_timestamp()))
+    (frame.write.format("delta").mode("append").option("mergeSchema", "true")
+     .saveAsTable(f"{OPS}.ingestion_log"))
+
+# Preflight ALL provider tables before ANY schema creation or writes.
+# NOTE: do not add df.cache()/df.persist()/df.unpersist() here; Databricks
+# serverless runtimes reject them (CACHE_REQUIRES_NEWER_CLIENT_ON_SERVERLESS_GC).
+try:
+    for logical_name, (physical_name, columns) in SOURCES.items():
+        source_fqn = f"{SOURCE}.{physical_name}"
+        source_df = spark.table(source_fqn)
+        missing = sorted(set(columns) - set(source_df.columns))
+        if missing:
+            raise RuntimeError(f"Source schema changed in {source_fqn}: {missing}")
+        raw = source_df.select(*[F.col(name) for name in columns])
+        prepared.append((logical_name, source_fqn, columns, raw))
+        if raw.count() < 1:
+            raise RuntimeError(f"Empty source table {source_fqn}; refusing ALL writes")
+except Exception as exc:
+    # Early-failure reporting (earlier review finding): a failed poll must
+    # appear in the operational log immediately instead of staying silent.
+    # Best effort: if OPS does not exist yet the log write is skipped and the
+    # original error is re-raised unmasked.
+    try:
+        append_log([(poll_run_id, logical_name, "", "", 0, False,
+                     "failed", str(exc)[:400], JOB_RUN_ID)], complete=False)
+    except Exception:
+        pass
+    raise
+
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {BRONZE}")
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {OPS}")
+
+try:
+    for logical_name, source_fqn, columns, raw in prepared:
+        target_fqn = f"{BRONZE}.{logical_name}_snapshots"
+        canonical = F.to_json(
+            F.struct(*[F.col(name) for name in sorted(columns)]),
+            options={"ignoreNullFields": "false"}
+        )
+        hashed = raw.withColumn("_record_hash", F.sha2(canonical, 256))
+        previous = latest_snapshot(target_fqn)
+        changed = has_changed(hashed, previous)
+
+        if changed:
+            active_snapshot_id = str(uuid.uuid4())
+            (hashed.withColumn("_snapshot_id", F.lit(active_snapshot_id))
+             .withColumn("_captured_at", F.current_timestamp())
+             .withColumn("_source_table", F.lit(source_fqn))
+             .write.format("delta").mode("append").option("mergeSchema", "true")
+             .saveAsTable(target_fqn))
+        else:
+            # An unchanged poll still references the real previous snapshot.
+            active_snapshot_id = previous.select("_snapshot_id").first()["_snapshot_id"]
+
+        source_rows = raw.count()
+        run_log.append((poll_run_id, logical_name, source_fqn,
+                        active_snapshot_id, int(source_rows), changed,
+                        "succeeded", "", JOB_RUN_ID))
+        print(f"{logical_name}: rows={source_rows:,}; changed={changed}; snapshot={active_snapshot_id}")
+except Exception as exc:
+    # Early-failure reporting (earlier review finding): persist the rows
+    # collected so far plus one failed row for the failing source, ALL marked
+    # poll_complete=False so the incomplete poll can never be selected
+    # downstream (Silver and the quality gate require a complete flag set).
+    try:
+        append_log(list(run_log) + [
+            (poll_run_id, logical_name, source_fqn, "", 0, False,
+             "failed", str(exc)[:400], JOB_RUN_ID)], complete=False)
+    except Exception:
+        pass  # observability is best-effort; never mask the original error
+    raise
+
+# Log only a completed three-source snapshot loop (not a multi-table ACID commit).
+# Explicit transaction flag: these rows are written ONLY after all three source
+# snapshot writes finished. poll_complete=True marks a finished poll.
+append_log(run_log, complete=True)
+
+# Explicit poll hand-off (earlier review finding): downstream tasks must not
+# independently resolve 'latest'. Silver and the quality gate cross-check this
+# task value against the committed log poll. Outside a Job context (interactive
+# runs and tests) task values are unavailable, so setting them is best-effort.
+try:
+    dbutils.jobs.taskValues.set(key="committed_poll_id", value=poll_run_id)
+except Exception:
+    pass
 
 # COMMAND ----------
 

@@ -50,19 +50,28 @@ SELECT * FROM workspace.drugsafety360_gold.narrative_label_summary LIMIT 20;
 -- that failed before its completed-poll log append. Silver ignores these
 -- orphans by design; this inventory surfaces them so partial runs are never
 -- silent. Expected result on a healthy workspace: zero rows.
+-- NOT EXISTS is used deliberately (review round 2): a NOT IN membership set
+-- containing NULL silently drops EVERY row from the result, mislabeling
+-- uncommitted snapshots as committed.
 SELECT _snapshot_id, COUNT(*) AS orphan_rows
-FROM workspace.drugsafety360_bronze.adr_reference_snapshots
-WHERE _snapshot_id NOT IN (SELECT snapshot_id FROM workspace.drugsafety360_ops.ingestion_log)
+FROM workspace.drugsafety360_bronze.adr_reference_snapshots b
+WHERE NOT EXISTS (
+    SELECT 1 FROM workspace.drugsafety360_ops.ingestion_log l
+    WHERE l.snapshot_id = b._snapshot_id)
 GROUP BY _snapshot_id;
 
 SELECT _snapshot_id, COUNT(*) AS orphan_rows
-FROM workspace.drugsafety360_bronze.chemical_annotations_snapshots
-WHERE _snapshot_id NOT IN (SELECT snapshot_id FROM workspace.drugsafety360_ops.ingestion_log)
+FROM workspace.drugsafety360_bronze.chemical_annotations_snapshots b
+WHERE NOT EXISTS (
+    SELECT 1 FROM workspace.drugsafety360_ops.ingestion_log l
+    WHERE l.snapshot_id = b._snapshot_id)
 GROUP BY _snapshot_id;
 
 SELECT _snapshot_id, COUNT(*) AS orphan_rows
-FROM workspace.drugsafety360_bronze.narrative_labels_snapshots
-WHERE _snapshot_id NOT IN (SELECT snapshot_id FROM workspace.drugsafety360_ops.ingestion_log)
+FROM workspace.drugsafety360_bronze.narrative_labels_snapshots b
+WHERE NOT EXISTS (
+    SELECT 1 FROM workspace.drugsafety360_ops.ingestion_log l
+    WHERE l.snapshot_id = b._snapshot_id)
 GROUP BY _snapshot_id;
 
 -- Complete reconciliation of ALL seven Gold marts against their Silver

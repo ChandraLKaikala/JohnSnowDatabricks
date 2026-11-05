@@ -75,14 +75,14 @@ This guide follows the `# COMMAND ----------` boundaries in the six source noteb
 - On unchanged data, retains the previous Bronze snapshot and logs its REAL snapshot ID, not the string `unchanged`. Each three-source poll uses one unique `poll_run_id`.
 
 ### Cell 5 — Observability
-- Cell 4 appends `ingestion_log` only after all three source snapshot writes succeed; the log contains `poll_run_id`, source name, row count, actual active snapshot ID, changed flag and check timestamp. No Spark cache/persist is used; source frames are simply re-scanned per action (serverless-compatible).
+- Cell 4 appends `ingestion_log` only after all three source snapshot writes succeed; the log contains `poll_run_id`, source name, row count, actual active snapshot ID, changed flag, `poll_complete`, `status`, `error_message`, `job_run_id` and the check timestamp. If a poll FAILS (unreadable third source, source schema change, mid-loop write error), the failed poll is logged immediately with `poll_complete=false`, so partial polls are visible in the operational log instead of silent. No Spark cache/persist is used; source frames are simply re-scanned per action (serverless-compatible).
 - This is a low-cost basis for a freshness/operations report; it does **not** mean every change was immediately observed.
 
 ## Notebook 02_silver_standardize.py — Normalized Silver plus quarantine
 
 ### Cell 1 — Resolve the latest completed poll manifest
 - Validates writable catalog, creates only `workspace.drugsafety360_silver`.
-- Reads `workspace.drugsafety360_ops.ingestion_log`, identifies the last complete three-source `poll_run_id`, and uses its recorded snapshot IDs. Validates all three committed Bronze snapshots **before** overwriting any Silver table. Newer unlogged/orphaned Bronze snapshots are excluded.
+- Reads `workspace.drugsafety360_ops.ingestion_log`, identifies the last complete three-source `poll_run_id`, and uses its recorded snapshot IDs. A poll is eligible ONLY if every log row in it carries `poll_complete=true` (legacy NULL rows predate the flag and are validated by the three-entry rule; an explicit `false` — e.g. from a failed poll — always disqualifies). Inside a Job, Bronze publishes its `committed_poll_id` task value and Silver cross-checks it, so tasks never independently resolve 'latest'. Validates all three committed Bronze snapshots **before** overwriting any Silver table. Newer unlogged/orphaned Bronze snapshots are excluded.
 - `publish()` overwrites each **project-owned** current Silver table only. Every output retains `source_snapshot_id` so the quality gate can prove the source generation, even when row counts match.
 
 ### Cell 2 — Product–reaction reference
@@ -139,8 +139,8 @@ This guide follows the `# COMMAND ----------` boundaries in the six source noteb
 - Checks that all three latest Bronze snapshot IDs equal the IDs logged for the last completed ingestion poll.
 
 ### Cell 3 — Cross-layer reconciliation
-- Requires exactly one executive metrics row.
-- Reconciles executive metrics and all SIX additional Gold summaries to their Silver source counts.
+- Requires exactly one executive metrics row; its full content (including all distinct metrics) is recomputed from Silver and compared column by column.
+- Each of the six remaining Gold summaries is RECOMPUTED from Silver with exactly the publish aggregation and compared to Gold as a full row multiset in both directions (`exceptAll`), so wrong grouping labels or incorrect per-group distinct metrics fail the gate — not just wrong totals.
 - This is an engineering consistency check, not clinical safety validation.
 
 ### Cell 4 — Append log, fail if required

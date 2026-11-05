@@ -44,6 +44,10 @@ class _Runtime:
         self.conf = session.conf
         self.tables = {}
         self.created_schemas = []
+        # Notebooks pin spark.sql.session.timeZone via spark.conf.set; the
+        # mock must expose the real session's runtime configuration so the
+        # configuration actually applies (review round 2).
+        self.conf = session.conf
         self.catalog = SimpleNamespace(tableExists=lambda name: name in self.tables)
 
     def table(self, name):
@@ -272,7 +276,15 @@ def _run_end_to_end_sweep(runtime, spark):
             runtime.tables[missing_name] = saved_narrative
             runtime.tables[source_table] = old_source
         assert runtime.table(bronze).count() == bronze_rows_before
-        assert runtime.table("workspace.drugsafety360_ops.ingestion_log").count() == poll_rows_before
+        # Early-failure reporting (review round 2): the failed poll is logged
+        # immediately, marked poll_complete=False so it can never be selected
+        # by Silver or the quality gate.
+        failed_log = runtime.table("workspace.drugsafety360_ops.ingestion_log")
+        assert failed_log.count() == poll_rows_before + 1
+        failed_row = failed_log.where("status = 'failed'").first()
+        assert failed_row is not None
+        assert failed_row["poll_complete"] is False
+        assert failed_row["source_name"] == "narrative_labels"
 
         # Append an unlogged "newer" Bronze snapshot, as if a later
         # three-source poll failed before its final ingestion log append.
@@ -416,9 +428,11 @@ def test_changed_snapshot_appends_new_bronze_version_and_refreshes_gold(spark_se
     assert runtime.table(bronze).count() == 9  # first 4 rows + second 5-row snapshot
     assert runtime.table(bronze).select("_snapshot_id").distinct().count() == 2
     new_log = runtime.table("workspace.drugsafety360_ops.ingestion_log")
-    # This focused test starts with ONE committed poll (3 rows), then adds ONE (3 rows).
+    # _prepare ran Bronze exactly once (1 poll = 3 log rows); this changed
+    # re-poll adds one more poll (3 rows): 6 rows, 2 distinct poll IDs, and
+    # 4 changed source rows (3 first-poll + ADR).
     assert new_log.count() == 6
-    assert new_log.where("changed = true").count() == 4  # first 3 + changed ADR
+    assert new_log.where("changed = true").count() == 4
     assert new_log.select("poll_run_id").distinct().count() == 2
     _execute_notebook("02_silver_standardize.py", runtime)
     _execute_notebook("03_gold_analytics.py", runtime)
@@ -450,7 +464,16 @@ def test_failed_third_source_prevents_all_bronze_writes(spark_session, monkeypat
         runtime.tables[source_table] = old_source
     assert runtime.table(
         "workspace.drugsafety360_bronze.adr_reference_snapshots").count() == bronze_rows_before
-    assert runtime.table("workspace.drugsafety360_ops.ingestion_log").count() == poll_rows_before
+    # Early-failure reporting (review round 2): the failed poll is logged
+    # immediately, marked poll_complete=False so it can never be selected
+    # by Silver or the quality gate.
+    failed_log = runtime.table("workspace.drugsafety360_ops.ingestion_log")
+    assert failed_log.count() == poll_rows_before + 1
+    failed_row = failed_log.where("status = 'failed'").first()
+    assert failed_row is not None
+    assert failed_row["poll_complete"] is False
+    assert failed_row["source_name"] == "narrative_labels"
+    assert "Table missing in synthetic runtime" in failed_row["error_message"]
 
 
 @pytest.mark.integration
@@ -461,7 +484,9 @@ def test_silver_ignores_uncommitted_orphan_snapshot(spark_session, monkeypatch):
     orphan = (runtime.table(bronze).where("Medicinal_Product = 'Drug B'")
               .withColumn("_snapshot_id", F.lit("UNCOMMITTED_ORPHAN"))
               .withColumn("_captured_at", F.current_timestamp()))
-    assert orphan.count() == 1
+    # The fixture intentionally contains TWO identical Drug A rows, so the
+    # orphaned snapshot carries 2 rows, not 1.
+    assert orphan.count() == 2
     runtime.tables[bronze] = runtime.table(bronze).unionByName(orphan)
     _execute_notebook("02_silver_standardize.py", runtime)
     accepted = runtime.table("workspace.drugsafety360_silver.adr_reference_current")

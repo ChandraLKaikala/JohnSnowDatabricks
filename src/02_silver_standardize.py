@@ -5,7 +5,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Pin UTC session timezone
+# DBTITLE 1,Enforce poll_complete before Silver writes + poll hand-off
 import re
 from pyspark.sql import functions as F
 
@@ -22,17 +22,45 @@ SOURCES = ("adr_reference", "chemical_annotations", "narrative_labels")
 spark.conf.set("spark.sql.session.timeZone", "UTC")
 
 # A Delta append of three records constitutes one finished ingestion poll.
+# A poll is eligible ONLY if EVERY log row in it is transactionally complete
+# (review round 2: poll_complete is enforced HERE, before any Silver write,
+# not merely reported by the quality gate afterwards). Migration rule for
+# rows written before the poll_complete column existed: NULL means "legacy
+# poll, validated by the three-entry structural rule", so NULL counts as
+# complete; an explicit false always disqualifies the poll. A poll that
+# failed mid-loop carries explicit false rows (early-failure reporting in
+# Bronze) and can never be selected.
 log = spark.table(f"{OPS}.ingestion_log").where(F.col("poll_run_id").isNotNull())
+complete_flag = (F.lit(True) if "poll_complete" not in set(log.columns)
+                 else F.coalesce(F.col("poll_complete"), F.lit(True)))
 polls = (log.groupBy("poll_run_id")
          .agg(F.count("*").alias("entries"),
               F.countDistinct("source_name").alias("unique_sources"),
-              F.max("checked_at").alias("at"))
+              F.max("checked_at").alias("at"),
+              F.min(complete_flag).alias("transactionally_complete"))
          .where((F.col("entries") == len(SOURCES)) &
-                (F.col("unique_sources") == len(SOURCES)))
+                (F.col("unique_sources") == len(SOURCES)) &
+                F.col("transactionally_complete"))
          .orderBy(F.desc("at"), F.desc("poll_run_id")).limit(1).collect())
 if not polls:
     raise RuntimeError("No completed three-source Bronze ingestion poll. Run 01_bronze_ingest first.")
 committed_poll_id = polls[0]["poll_run_id"]
+
+# Explicit poll hand-off (earlier review finding): inside a Job, Bronze sets
+# the committed_poll_id task value so tasks do not independently resolve
+# 'latest'. Cross-check it against the log-derived committed poll; outside a
+# Job (interactive runs and tests) the value is unavailable and the log-
+# derived poll is authoritative.
+try:
+    job_poll_id = dbutils.jobs.taskValues.get(
+        taskKey="bronze_ingest", key="committed_poll_id",
+        default=None, debugValue=None)
+except Exception:
+    job_poll_id = None
+if job_poll_id and job_poll_id != committed_poll_id:
+    raise RuntimeError(
+        f"Job hand-off poll {job_poll_id} does not match the committed "
+        f"log poll {committed_poll_id}")
 manifest_rows = log.where(F.col("poll_run_id") == F.lit(committed_poll_id)).collect()
 active_ids = {row["source_name"]: row["snapshot_id"] for row in manifest_rows}
 if set(active_ids) != set(SOURCES) or any(not sid for sid in active_ids.values()):

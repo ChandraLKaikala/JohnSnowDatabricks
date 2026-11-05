@@ -5,7 +5,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Pin UTC session timezone
+# DBTITLE 1,Drop sum-only helper (replaced by grouped-content validation)
 import re
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, LongType, BooleanType
@@ -27,22 +27,40 @@ checks = []
 def record(name, observed, passed):
     checks.append((name, int(observed), bool(passed)))
 
-def count_sum(table_fqn, value_col):
-    result = spark.table(table_fqn).agg(F.sum(F.col(value_col)).alias("total")).first()
-    return int(result["total"] or 0)
-
 SOURCE_NAMES = ("adr_reference", "chemical_annotations", "narrative_labels")
 log = spark.table(f"{OPS}.ingestion_log").where(F.col("poll_run_id").isNotNull())
+# Same eligibility rule as Silver (review round 2): every log row must be
+# transactionally complete. Legacy NULL flags count as complete (structural
+# three-entry rule governed completion before the column existed); an
+# explicit false always disqualifies the poll.
+complete_flag = (F.lit(True) if "poll_complete" not in set(log.columns)
+                 else F.coalesce(F.col("poll_complete"), F.lit(True)))
 polls = (log.groupBy("poll_run_id")
          .agg(F.count("*").alias("entries"),
               F.countDistinct("source_name").alias("unique_sources"),
-              F.max("checked_at").alias("at"))
+              F.max("checked_at").alias("at"),
+              F.min(complete_flag).alias("transactionally_complete"))
          .where((F.col("entries") == len(SOURCE_NAMES)) &
-                (F.col("unique_sources") == len(SOURCE_NAMES)))
+                (F.col("unique_sources") == len(SOURCE_NAMES)) &
+                F.col("transactionally_complete"))
          .orderBy(F.desc("at"), F.desc("poll_run_id")).limit(1).collect())
 if not polls:
     raise RuntimeError("No completed three-source ingestion poll; cannot validate Silver")
 committed_poll_id = polls[0]["poll_run_id"]
+
+# Explicit poll hand-off (earlier review finding): cross-check the task value
+# Bronze published so tasks never independently resolve 'latest'. Outside a
+# Job the value is unavailable and the log-derived poll is authoritative.
+try:
+    job_poll_id = dbutils.jobs.taskValues.get(
+        taskKey="bronze_ingest", key="committed_poll_id",
+        default=None, debugValue=None)
+except Exception:
+    job_poll_id = None
+if job_poll_id and job_poll_id != committed_poll_id:
+    raise RuntimeError(
+        f"Job hand-off poll {job_poll_id} does not match the committed "
+        f"log poll {committed_poll_id}")
 poll_rows = log.where(F.col("poll_run_id") == F.lit(committed_poll_id)).collect()
 manifest = {row["source_name"]: row for row in poll_rows}
 if set(manifest) != set(SOURCE_NAMES) or any(not row["snapshot_id"] for row in manifest.values()):
@@ -62,7 +80,7 @@ def committed_bronze_snapshot(source_name):
 
 # COMMAND ----------
 
-# DBTITLE 1,Count once, surface orphan snapshots and poll_complete flag
+# DBTITLE 1,Gate: NULL-safe orphan anti-join + legacy-tolerant flag check
 adr = spark.table(f"{SILVER}.adr_reference_current")
 chemical = spark.table(f"{SILVER}.chemical_evidence_current")
 narrative = spark.table(f"{SILVER}.narrative_labels_current")
@@ -125,21 +143,31 @@ record("quarantine_rows_observed", quarantine_count, True)
 # Silver ignores these orphans by design; surface their size so partial runs
 # are visible instead of silent. Informational (always passes) because
 # orphan rows are expected artifacts of a failed, recoverable poll.
-committed_ids = [r["snapshot_id"] for r in log.select("snapshot_id").distinct().collect()]
+committed = (log.where(F.col("snapshot_id").isNotNull())
+             .select(F.col("snapshot_id").alias("_snapshot_id")).distinct())
 orphan_rows = 0
 for name in SOURCE_NAMES:
     history = spark.table(f"{BRONZE}.{name}_snapshots")
-    orphan_rows += history.where(~F.col("_snapshot_id").isin(committed_ids)).count()
+    # left_anti join is NULL-safe (review round 2): a NOT IN membership set
+    # containing NULL silently drops EVERY row from the result, mislabeling
+    # uncommitted rows as committed. Anti-join never has that failure mode.
+    orphan_rows += history.join(committed, "_snapshot_id", "left_anti").count()
 record("uncommitted_bronze_snapshot_rows_ignored", orphan_rows, True)
 
 # The committed poll must carry the explicit poll_complete transaction flag
-# when the log table provides the column; legacy log rows predate the flag
-# (a three-entry poll was already the completion marker), so they pass.
+# when the log table provides the column.
+# Migration rule (review round 2 — the previous code contradicted its own
+# comment): legacy rows carry NULL because the column did not exist when they
+# were written. NULL passes; ONLY an explicit false fails. bool(None) is
+# falsy, so testing bool(row[...]) would fail every legacy poll.
 if "poll_complete" in set(log.columns):
-    poll_flags_good = all(bool(row["poll_complete"]) for row in poll_rows)
+    explicit_incomplete = [r for r in poll_rows if r["poll_complete"] is False]
+    poll_flags_good = not explicit_incomplete
+    observed_flag_rows = len(explicit_incomplete)
 else:
     poll_flags_good = True
-record("committed_poll_complete_flag", int(poll_flags_good), poll_flags_good)
+    observed_flag_rows = 0
+record("committed_poll_complete_flag", observed_flag_rows, poll_flags_good)
 
 # COMMAND ----------
 
@@ -148,32 +176,96 @@ record("committed_poll_complete_flag", int(poll_flags_good), poll_flags_good)
 
 # COMMAND ----------
 
-# DBTITLE 1,Reuse materialized Silver counts in Gold reconciliation
+# DBTITLE 1,Grouped-content Gold validation (exceptAll both directions)
 # Poll provenance and Bronze/Silver snapshot IDs were verified in Cells 1–2.
+
+# Grouped-content validation (earlier review finding): comparing SUMS only
+# lets wrong grouping labels and incorrect per-group distinct metrics escape
+# validation. Each mart is RECOMPUTED from Silver with exactly the publish
+# aggregation and compared to the Gold table as a full row multiset in BOTH
+# directions (exceptAll), so any label, grouping or value difference fails.
+def mart_mismatches(mart_name, recomputed):
+    gold_table = spark.table(f"{GOLD}.{mart_name}")
+    return (recomputed.exceptAll(gold_table).count()
+            + gold_table.exceptAll(recomputed).count())
+
+adr_silver = spark.table(f"{SILVER}.adr_reference_current")
+chem_silver = spark.table(f"{SILVER}.chemical_evidence_current")
+narr_silver = spark.table(f"{SILVER}.narrative_labels_current")
 
 metrics = spark.table(f"{GOLD}.executive_metrics")
 metric_count = metrics.count()
 record("single_executive_metrics_row", metric_count, metric_count == 1)
-# adr_count was materialized once in Cell 2; reuse it instead of recomputing
-# a full Silver scan so all reconciliations observe one consistent state.
 if metric_count == 1:
+    # adr_count was materialized once in Cell 2; reuse it for the row-count
+    # reconciliation so all checks observe one consistent state.
     executive_count = int(metrics.select("reference_rows").first()["reference_rows"])
     record("gold_executive_matches_silver", abs(executive_count - adr_count),
            executive_count == adr_count)
+    # Full-content check of the executive row too (distinct metrics included);
+    # computed_at is excluded because it is a publication timestamp.
+    recomputed_exec = adr_silver.agg(
+        F.count("*").alias("reference_rows"),
+        F.countDistinct("product_name").alias("distinct_products"),
+        F.countDistinct("active_substance").alias("distinct_substances"),
+        F.countDistinct("reaction_term").alias("distinct_reaction_terms"),
+        F.countDistinct("meddra_pt_code").alias("distinct_meddra_pt_codes"),
+        F.sum(F.when(F.col("is_class_warning") == True, 1).otherwise(0)).alias("class_warning_rows"),
+        F.sum(F.when(F.col("is_clinical_trial_source") == True, 1).otherwise(0)).alias("clinical_trial_tagged_rows"),
+        F.sum(F.when(F.col("is_post_marketing_source") == True, 1).otherwise(0)).alias("postmarketing_tagged_rows")
+    )
+    stored_exec = metrics.select(*recomputed_exec.columns).first()
+    computed_exec = recomputed_exec.first()
+    exec_mismatches = [c for c in recomputed_exec.columns if stored_exec[c] != computed_exec[c]]
+    record("gold_executive_metrics_content", len(exec_mismatches), not exec_mismatches)
 
-for mart in ("product_reference_summary", "product_reaction_associations",
-             "frequency_mix", "source_flags_mix"):
-    counted = count_sum(f"{GOLD}.{mart}", "reference_rows")
-    record(f"gold_{mart}_matches_silver", abs(counted - adr_count),
-           counted == adr_count)
+record("gold_product_reference_summary_matches_silver",
+       mart_mismatches("product_reference_summary",
+           adr_silver.groupBy("product_name", "active_substance").agg(
+               F.count("*").alias("reference_rows"),
+               F.countDistinct("reaction_term").alias("unique_reaction_terms"),
+               F.countDistinct("meddra_pt_code").alias("unique_meddra_pt_codes"))),
+       True)
 
-for mart, expected_count in (
-    ("chemical_evidence_summary", chemical_count),
-    ("narrative_label_summary", narrative_count)
-):
-    counted = count_sum(f"{GOLD}.{mart}", "annotation_rows")
-    record(f"gold_{mart}_matches_silver", abs(counted - expected_count),
-           counted == expected_count)
+record("gold_product_reaction_associations_matches_silver",
+       mart_mismatches("product_reaction_associations",
+           adr_silver.groupBy(
+               "product_name", "active_substance", "reaction_term", "meddra_pt_text",
+               "meddra_pt_code", "meddra_soc_code"
+           ).agg(F.count("*").alias("reference_rows"))),
+       True)
+
+record("gold_frequency_mix_matches_silver",
+       mart_mismatches("frequency_mix",
+           adr_silver.groupBy("frequency_category").agg(F.count("*").alias("reference_rows"))),
+       True)
+
+record("gold_source_flags_mix_matches_silver",
+       mart_mismatches("source_flags_mix",
+           adr_silver.groupBy("is_class_warning", "is_clinical_trial_source", "is_post_marketing_source")
+              .agg(F.count("*").alias("reference_rows"))),
+       True)
+
+record("gold_chemical_evidence_summary_matches_silver",
+       mart_mismatches("chemical_evidence_summary",
+           chem_silver.groupBy("annotated_relation", "verified_relation", "is_ambiguous").agg(
+               F.count("*").alias("annotation_rows"),
+               F.countDistinct("chemical_id").alias("chemicals"),
+               F.countDistinct("disease_id").alias("diseases"))),
+       True)
+
+record("gold_narrative_label_summary_matches_silver",
+       mart_mismatches("narrative_label_summary",
+           narr_silver.groupBy("relation_type", "relation_description", "is_document_ambiguous")
+              .agg(F.count("*").alias("annotation_rows"))),
+       True)
+
+# Enforce the zero-mismatch rule: a grouped-content record above only fails
+# the gate if its observed mismatch count is 0 -> passed mapping is correct.
+checks = [(name, observed, passed and observed == 0)
+          if (name.startswith("gold_") and name.endswith("_matches_silver"))
+          else (name, observed, passed)
+          for name, observed, passed in checks]
 
 # COMMAND ----------
 

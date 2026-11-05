@@ -95,7 +95,7 @@ For Free Edition keep costs bounded: one job run at once, no simultaneous tasks,
 - Ingestion: compare hash counts, refuse empty sources, append poll log.
 - Silver: quarantine missing ADR product/reaction, preserve provenance hashes.
 - Gold: descriptive aggregates and timestamped computation.
-- Quality gate: check the committed poll's Bronze-to-Silver counts, verify `source_snapshot_id` on each nonempty Silver output (not only record counts), and reconcile all seven Gold marts to Silver.
+- Quality gate: check the committed poll's Bronze-to-Silver counts, verify `source_snapshot_id` on each nonempty Silver output (not only record counts), and validate all seven Gold marts by RECOMPUTING each aggregation from Silver and comparing the full row multisets in both directions (`exceptAll`) — wrong grouping labels or incorrect per-group distinct metrics fail, not just wrong totals. The committed poll must carry `poll_complete=true` (legacy NULL rows predate the flag and pass; an explicit `false` fails), orphan Bronze snapshot rows from failed polls are surfaced informationally via a NULL-safe `left_anti` join, and the Job task value `committed_poll_id` published by Bronze is cross-checked so tasks never independently resolve 'latest'.
 - Limitations: no automated medical/coding validation, no source SLA, no reliable source event-time latency measure, no regulatory compliance certification.
 
 ## Existing-workspace cleanup isolation
