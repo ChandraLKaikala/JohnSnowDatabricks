@@ -39,6 +39,9 @@ class _Widgets:
 class _Runtime:
     def __init__(self, session):
         self.session = session
+        # Real notebooks configure Spark session settings such as UTC timezone.
+        # Expose the genuine SparkConf API through the synthetic catalog adapter.
+        self.conf = session.conf
         self.tables = {}
         self.created_schemas = []
         self.catalog = SimpleNamespace(tableExists=lambda name: name in self.tables)
