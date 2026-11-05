@@ -4,7 +4,7 @@
 - Repository: ChandraLKaikala/JohnSnowDatabricks.
 - Source catalog: john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction.
 - Inspected: all six Python notebooks, Asset Bundle YAML, workflow, SQL, tests, architecture and presentation Markdown, and serialized Lakeview dashboard.
-- **Certification (2026-11-04, static): NOT ERROR-FREE / NOT DEPLOYED.** Static and synthetic Spark tests cannot prove Databricks Unity Catalog writes or dashboard rendering.
+- **Certification (2026-11-04, static): NOT ERROR-FREE. Update 2026-11-05: DEPLOYED and verified in this workspace** — job `drugsafety360_refresh` (serverless, bronze→silver→gold→quality) ran end-to-end; 4 `workspace.drugsafety360_*` schemas with 16 Delta tables; quality gate passed; tier counts reconcile (64,482 / 5,713 / 2,020). CI tests still cannot prove multi-table ACID atomicity across the four tasks or dashboard visual rendering.
 - **Follow-up (2026-11-05, live): DEPLOYED AND VALIDATED.** The paused job `drugsafety360_refresh` (job_id 121764449857357) ran all four tasks end-to-end SUCCESS; 16 Delta tables exist across 4 `drugsafety360_*` schemas; `executive_metrics` has exactly 1 row; Bronze reconciles exactly (64,482 / 5,713 / 2,020 rows, one snapshot each); `quality_check_log` shows 24/24 passed; an unchanged-source re-run logged `changed=false` for all three sources (idempotency proven); the source-explorer dashboard renders all visuals and is published. The one runtime defect found during live validation (serverless rejection of `df.cache()`) was fixed in `src/01_bronze_ingest.py` and verified by re-run.
 
 ## Verified provider schema and source availability

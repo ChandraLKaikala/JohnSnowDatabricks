@@ -45,7 +45,7 @@ workspace.drugsafety360_ops.quality_check_log
      +--> AI/BI Dashboard (after validating Gold outputs)
 ```
 
-The existing Databricks dashboard **DrugSafety360 — John Snow Labs Source Explorer [Medallion Pending]** reads shared **source tables directly**. It was saved and read back. It is not proof that downstream Gold tables or dashboard runtime visuals work.
+The published Databricks dashboard **DrugSafety360 — John Snow Labs Source Explorer** (no longer titled “[Medallion Pending]”) reads the **source tables directly** as a source-explorer preview. Update 2026-11-05: the medallion pipeline IS deployed in this workspace — job `drugsafety360_refresh` (serverless, 4 sequential tasks) maintains 16 Delta tables across `workspace.drugsafety360_bronze/silver/gold/ops`. A Gold-layer dashboard remains a possible follow-up; this source explorer is not it.
 
 ## Bronze semantics
 A source table is not a Kafka topic. There is no dependable event ID in the verified schema. A full snapshot can at best detect that the *multiset* of current source records changed. For each source:

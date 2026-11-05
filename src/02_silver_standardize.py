@@ -4,6 +4,8 @@
 # MAGIC **Cell 1:** Resolve a complete three-source poll from the Bronze ingestion log BEFORE writing Silver. A newer Bronze snapshot may be orphaned by a failed ingestion. Never mix that uncommitted snapshot with older sources.
 
 # COMMAND ----------
+
+# DBTITLE 1,Pin UTC session timezone
 import re
 from pyspark.sql import functions as F
 
@@ -15,6 +17,9 @@ BRONZE = f"{catalog}.drugsafety360_bronze"
 SILVER = f"{catalog}.drugsafety360_silver"
 OPS = f"{catalog}.drugsafety360_ops"
 SOURCES = ("adr_reference", "chemical_annotations", "narrative_labels")
+# Pin session timezone to UTC so snapshot_at and timestamp ordering match the
+# Bronze/quality layers exactly across environments.
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 
 # A Delta append of three records constitutes one finished ingestion poll.
 log = spark.table(f"{OPS}.ingestion_log").where(F.col("poll_run_id").isNotNull())
@@ -58,25 +63,30 @@ def publish(df, name):
 print(f"Using committed Bronze poll: {committed_poll_id}")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Cell 2:** Normalize the product/reaction reference rows and preserve the originating committed snapshot ID. Invalid required product/reaction labels go to quarantine; repeated reference records are not deduplicated.
 
 # COMMAND ----------
+
+# DBTITLE 1,Explicit type normalization for ADR reference columns
 adr = latest("adr_reference").select(
     clean("Medicinal_Product").alias("product_name"),
     clean("Active_Substance").alias("active_substance"),
-    F.col("Date_Of_Most_Recent_SPC").alias("spc_label_date"),
+    F.col("Date_Of_Most_Recent_SPC").cast("date").alias("spc_label_date"),
     clean("Adverse_Drug_Reaction_Term").alias("reaction_term"),
     clean("MedDRA_PT_Text").alias("meddra_pt_text"),
-    F.col("MedDRA_PT_Code").alias("meddra_pt_code"),
-    F.col("MedDRA_SOC_Code").alias("meddra_soc_code"),
+    # MedDRA codes are identifiers, not numbers: cast to string so joins and
+    # groupBys stay stable even if the provider column type changes.
+    F.col("MedDRA_PT_Code").cast("string").alias("meddra_pt_code"),
+    F.col("MedDRA_SOC_Code").cast("string").alias("meddra_soc_code"),
     clean("Age_Group").alias("labeled_age_group"),
     clean("Gender").alias("labeled_gender"),
     clean("Causality").alias("causality_label"),
     clean("Frequency").alias("frequency_category"),
-    F.col("Is_Class_Warning").alias("is_class_warning"),
-    F.col("Is_Clinical_Trial").alias("is_clinical_trial_source"),
-    F.col("Is_Post_Marketing_Surveillance").alias("is_post_marketing_source"),
+    F.col("Is_Class_Warning").cast("boolean").alias("is_class_warning"),
+    F.col("Is_Clinical_Trial").cast("boolean").alias("is_clinical_trial_source"),
+    F.col("Is_Post_Marketing_Surveillance").cast("boolean").alias("is_post_marketing_source"),
     F.col("_record_hash").alias("source_record_hash"),
     F.col("_captured_at").alias("snapshot_at"),
     F.col("_snapshot_id").alias("source_snapshot_id")
@@ -89,10 +99,13 @@ publish(adr.where(F.col("quality_error") == "").drop("quality_error"), "adr_refe
 publish(adr.where(F.col("quality_error") != ""), "adr_reference_quarantine")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Cell 3:** Keep the original chemical/disease annotation separate from its human-verified relation, and retain the exact committed Bronze snapshot ID.
 
 # COMMAND ----------
+
+# DBTITLE 1,Cast chemical ambiguity flag to boolean
 chemical = latest("chemical_annotations").select(
     clean("Chemical_Id").alias("chemical_id"),
     clean("Chemical_Name").alias("chemical_name"),
@@ -100,7 +113,7 @@ chemical = latest("chemical_annotations").select(
     clean("Disease_Name").alias("disease_name"),
     clean("Patient_Relation_Type").alias("annotated_relation"),
     clean("Patient_Relation_Type_Verification").alias("verified_relation"),
-    F.col("Is_Unit_Ambiguous").alias("is_ambiguous"),
+    F.col("Is_Unit_Ambiguous").cast("boolean").alias("is_ambiguous"),
     F.col("Trusted_Judgements").alias("trusted_judgements"),
     F.col("_record_hash").alias("source_record_hash"),
     F.col("_snapshot_id").alias("source_snapshot_id")
@@ -108,15 +121,18 @@ chemical = latest("chemical_annotations").select(
 publish(chemical, "chemical_evidence_current")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Cell 4:** Keep coded narrative classifications, never source patient free-text remarks. Preserve the source snapshot ID to verify lineage downstream.
 
 # COMMAND ----------
+
+# DBTITLE 1,Cast narrative ambiguity flag to boolean
 narrative = latest("narrative_labels").select(
     F.col("Unit_Id").alias("unit_id"),
     clean("Patient_Relation_Type").alias("relation_type"),
     clean("Patient_Relation_Description").alias("relation_description"),
-    F.col("Is_Document_Ambiguous").alias("is_document_ambiguous"),
+    F.col("Is_Document_Ambiguous").cast("boolean").alias("is_document_ambiguous"),
     F.col("Trusted_Judgements").alias("trusted_judgements"),
     F.col("_record_hash").alias("source_record_hash"),
     F.col("_snapshot_id").alias("source_snapshot_id")
@@ -124,9 +140,11 @@ narrative = latest("narrative_labels").select(
 publish(narrative, "narrative_labels_current")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Cell 5:** Silver always represents ONE completed Bronze ingestion poll. Uncommitted newer Bronze rows remain in Bronze for recovery but cannot leak into Silver. Gold and Quality must be re-run after Silver finishes.
 
 # COMMAND ----------
+
 print(f"Silver complete from committed poll {committed_poll_id}.")
 print("No raw patient remarks, free-text evidence sentences, or clinical incidence estimates copied.")

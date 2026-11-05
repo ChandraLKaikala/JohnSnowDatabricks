@@ -11,7 +11,12 @@ from types import SimpleNamespace
 
 import pytest
 
-pyspark = pytest.importorskip("pyspark")
+if os.environ.get("CI"):
+    # Review remediation: never silently skip Spark coverage in CI. A missing
+    # pyspark must fail the job loudly (import error), not skip as green.
+    import pyspark  # noqa: F401
+else:
+    pyspark = pytest.importorskip("pyspark")
 from pyspark.sql import SparkSession
 from pyspark.sql import types as T
 from pyspark.sql import functions as F
@@ -124,8 +129,8 @@ def _add_sources(runtime):
     )
 
 
-@pytest.mark.integration
-def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
+@pytest.fixture(scope="module")
+def spark_session():
     os.environ["SPARK_LOCAL_IP"] = "127.0.0.1"
     spark = (SparkSession.builder.master("local[2]")
              .appName("DrugSafety360 notebook integration tests")
@@ -133,6 +138,12 @@ def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
              .config("spark.ui.enabled", "false")
              .getOrCreate())
     spark.sparkContext.setLogLevel("ERROR")
+    yield spark
+    spark.stop()
+
+
+def _fresh_runtime(spark, monkeypatch):
+    """Fresh synthetic catalog + writer interception scoped to ONE test."""
     runtime = _Runtime(spark)
     _add_sources(runtime)
 
@@ -159,7 +170,14 @@ def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
 
     monkeypatch.setattr(DataFrameWriter, "mode", _record_mode)
     monkeypatch.setattr(DataFrameWriter, "saveAsTable", _save_to_synthetic_catalog)
-    try:
+    return runtime
+
+
+def _run_end_to_end_sweep(runtime, spark):
+    """Retained full end-to-end regression sweep: bronze→silver→gold→quality,
+    idempotence, changed-snapshot versioning, fault injection and orphan
+    handling, exactly as the former single scenario test."""
+    if True:  # former end-to-end body; indentation kept
         _execute_notebook("00_source_preflight.py", runtime)
         _execute_notebook("01_bronze_ingest.py", runtime)
         bronze = "workspace.drugsafety360_bronze.adr_reference_snapshots"
@@ -290,5 +308,186 @@ def test_real_notebooks_end_to_end_and_idempotence(monkeypatch):
         quality = runtime.table("workspace.drugsafety360_ops.quality_check_log")
         assert quality.where("passed = false").count() >= 1
         runtime.tables[frequency_name] = frequency_before
+
+
+@pytest.mark.integration
+def test_end_to_end_sweep(spark_session, monkeypatch):
+    """Focused tests isolate failures; this retained sweep proves the whole
+    pipeline still behaves correctly across stages and fault injections."""
+    runtime = _fresh_runtime(spark_session, monkeypatch)
+    _run_end_to_end_sweep(runtime, spark_session)
+
+
+# ---------------------------------------------------------------------------
+# Focused integration tests (review remediation): each test builds a fresh
+# synthetic catalog and executes only the notebooks it needs, so one early
+# failure no longer masks later recovery checks. The scenario helper above is
+# retained as the full end-to-end regression sweep.
+# ---------------------------------------------------------------------------
+
+_STAGE_STAGES = {
+    "bronze": ["01_bronze_ingest.py"],
+    "silver": ["01_bronze_ingest.py", "02_silver_standardize.py"],
+    "gold": ["01_bronze_ingest.py", "02_silver_standardize.py", "03_gold_analytics.py"],
+}
+
+
+def _prepare(spark_session, monkeypatch, through):
+    runtime = _fresh_runtime(spark_session, monkeypatch)
+    _execute_notebook("00_source_preflight.py", runtime)
+    for name in _STAGE_STAGES[through]:
+        _execute_notebook(name, runtime)
+    return runtime
+
+
+@pytest.mark.integration
+def test_bronze_ingest_is_idempotent_on_unchanged_repoll(spark_session, monkeypatch):
+    runtime = _prepare(spark_session, monkeypatch, "bronze")
+    bronze = "workspace.drugsafety360_bronze.adr_reference_snapshots"
+    assert runtime.table(bronze).count() == 4
+    assert runtime.table(bronze).select("_snapshot_id").distinct().count() == 1
+    _execute_notebook("01_bronze_ingest.py", runtime)
+    assert runtime.table(bronze).count() == 4
+    assert runtime.table(bronze).select("_snapshot_id").distinct().count() == 1
+    log = runtime.table("workspace.drugsafety360_ops.ingestion_log")
+    assert log.count() == 6
+    assert log.where("changed = true").count() == 3
+    assert log.where("changed = false").count() == 3
+    assert log.where("snapshot_id = 'unchanged'").count() == 0
+    assert log.select("poll_run_id").distinct().count() == 2
+    # Explicit transaction flag: every logged poll row is a COMPLETED poll.
+    assert log.where("poll_complete != true").count() == 0
+
+
+@pytest.mark.integration
+def test_silver_quarantines_invalid_rows_and_never_copies_patient_text(spark_session, monkeypatch):
+    runtime = _prepare(spark_session, monkeypatch, "silver")
+    valid = runtime.table("workspace.drugsafety360_silver.adr_reference_current")
+    rejected = runtime.table("workspace.drugsafety360_silver.adr_reference_quarantine")
+    assert valid.count() == 3
+    assert rejected.count() == 1
+    assert valid.where("product_name = 'Drug A'").count() == 2
+    labels = runtime.table("workspace.drugsafety360_silver.narrative_labels_current")
+    assert "Remarks_by_Patient" not in labels.columns
+    chem = runtime.table("workspace.drugsafety360_silver.chemical_evidence_current")
+    assert chem.first()["verified_relation"] == "No Relation"
+
+
+@pytest.mark.integration
+def test_gold_marts_reconcile_to_silver(spark_session, monkeypatch):
+    runtime = _prepare(spark_session, monkeypatch, "gold")
+    row = runtime.table("workspace.drugsafety360_gold.executive_metrics").first()
+    assert row["reference_rows"] == 3
+    assert row["distinct_products"] == 2
+    assert row["class_warning_rows"] == 1
+    for mart in ("product_reference_summary", "product_reaction_associations",
+                 "frequency_mix", "source_flags_mix", "chemical_evidence_summary",
+                 "narrative_label_summary"):
+        assert runtime.table("workspace.drugsafety360_gold." + mart).count() >= 1
+
+
+@pytest.mark.integration
+def test_quality_gate_passes_on_a_healthy_poll(spark_session, monkeypatch):
+    runtime = _prepare(spark_session, monkeypatch, "gold")
+    _execute_notebook("04_quality_gate.py", runtime)
+    quality = runtime.table("workspace.drugsafety360_ops.quality_check_log")
+    assert quality.count() >= 6
+    assert quality.where("passed = false").count() == 0
+    names = {r["check_name"] for r in quality.select("check_name").collect()}
+    assert "committed_poll_complete_flag" in names
+    assert "uncommitted_bronze_snapshot_rows_ignored" in names
+
+
+@pytest.mark.integration
+def test_changed_snapshot_appends_new_bronze_version_and_refreshes_gold(spark_session, monkeypatch):
+    runtime = _prepare(spark_session, monkeypatch, "gold")
+    source_name = SOURCE + ".adverse_reaction_with_preferred_term_and_system_organ_class_codes"
+    existing_source = runtime.table(source_name)
+    newer = spark_session.createDataFrame([
+        ("Drug C", "Active C", date(2016, 5, 1), "Rash", "Rash", 122, 100,
+         "Unspecified", "Unspecified", "Possible", "Uncommon", False, False, True)
+    ], schema=existing_source.schema)
+    runtime.tables[source_name] = existing_source.unionByName(newer)
+    _execute_notebook("01_bronze_ingest.py", runtime)
+    bronze = "workspace.drugsafety360_bronze.adr_reference_snapshots"
+    assert runtime.table(bronze).count() == 9  # first 4 rows + second 5-row snapshot
+    assert runtime.table(bronze).select("_snapshot_id").distinct().count() == 2
+    new_log = runtime.table("workspace.drugsafety360_ops.ingestion_log")
+    assert new_log.count() == 9
+    assert new_log.where("changed = true").count() == 4  # first 3 + changed ADR
+    assert new_log.select("poll_run_id").distinct().count() == 3
+    _execute_notebook("02_silver_standardize.py", runtime)
+    _execute_notebook("03_gold_analytics.py", runtime)
+    updated = runtime.table("workspace.drugsafety360_gold.executive_metrics").first()
+    assert updated["reference_rows"] == 4  # 5 source records less 1 quarantined
+    assert updated["distinct_products"] == 3
+
+
+@pytest.mark.integration
+def test_failed_third_source_prevents_all_bronze_writes(spark_session, monkeypatch):
+    runtime = _prepare(spark_session, monkeypatch, "bronze")
+    source_table = SOURCE + ".adverse_reaction_with_preferred_term_and_system_organ_class_codes"
+    old_source = runtime.table(source_table)
+    extra_source_row = spark_session.createDataFrame([
+        ("Drug D", "Active D", date(2016, 5, 2), "Fever", "Fever", 123, 100,
+         "Unspecified", "Unspecified", "Possible", "Rare", False, False, True)
+    ], schema=old_source.schema)
+    runtime.tables[source_table] = old_source.unionByName(extra_source_row)
+    missing_name = SOURCE + ".drug_relationship_database"
+    saved_narrative = runtime.tables.pop(missing_name)
+    bronze_rows_before = runtime.table(
+        "workspace.drugsafety360_bronze.adr_reference_snapshots").count()
+    poll_rows_before = runtime.table("workspace.drugsafety360_ops.ingestion_log").count()
+    try:
+        with pytest.raises(RuntimeError, match="Table missing in synthetic runtime"):
+            _execute_notebook("01_bronze_ingest.py", runtime)
     finally:
-        spark.stop()
+        runtime.tables[missing_name] = saved_narrative
+        runtime.tables[source_table] = old_source
+    assert runtime.table(
+        "workspace.drugsafety360_bronze.adr_reference_snapshots").count() == bronze_rows_before
+    assert runtime.table("workspace.drugsafety360_ops.ingestion_log").count() == poll_rows_before
+
+
+@pytest.mark.integration
+def test_silver_ignores_uncommitted_orphan_snapshot(spark_session, monkeypatch):
+    runtime = _prepare(spark_session, monkeypatch, "gold")
+    bronze = "workspace.drugsafety360_bronze.adr_reference_snapshots"
+    orphan = (runtime.table(bronze).where("Medicinal_Product = 'Drug A'")
+              .withColumn("_snapshot_id", F.lit("UNCOMMITTED_ORPHAN"))
+              .withColumn("_captured_at", F.current_timestamp()))
+    assert orphan.count() == 1
+    runtime.tables[bronze] = runtime.table(bronze).unionByName(orphan)
+    _execute_notebook("02_silver_standardize.py", runtime)
+    accepted = runtime.table("workspace.drugsafety360_silver.adr_reference_current")
+    assert accepted.count() == 3
+    ids = [r[0] for r in accepted.select("source_snapshot_id").distinct().collect()]
+    assert len(ids) == 1 and ids[0] != "UNCOMMITTED_ORPHAN"
+    # The informational orphan check must NOT fail the gate.
+    _execute_notebook("04_quality_gate.py", runtime)
+    quality = runtime.table("workspace.drugsafety360_ops.quality_check_log")
+    assert quality.where(
+        "check_name = 'uncommitted_bronze_snapshot_rows_ignored' AND passed = true").count() >= 1
+    assert quality.where("passed = false").count() == 0
+
+
+@pytest.mark.integration
+def test_quality_gate_fails_on_wrong_snapshot_and_truncated_gold(spark_session, monkeypatch):
+    runtime = _prepare(spark_session, monkeypatch, "gold")
+    # A same-size Silver table with the WRONG snapshot ID must fail.
+    silver_name = "workspace.drugsafety360_silver.adr_reference_current"
+    original_silver = runtime.table(silver_name)
+    runtime.tables[silver_name] = original_silver.withColumn(
+        "source_snapshot_id", F.lit("NOT_THE_COMMITTED_SNAPSHOT"))
+    with pytest.raises(RuntimeError, match="silver_snapshot_adr_reference_0"):
+        _execute_notebook("04_quality_gate.py", runtime)
+    runtime.tables[silver_name] = original_silver
+    # Fault injection: one truncated Gold mart must record failed checks
+    # before raising, not give a false passing result.
+    frequency_name = "workspace.drugsafety360_gold.frequency_mix"
+    frequency_before = runtime.table(frequency_name)
+    runtime.tables[frequency_name] = frequency_before.where("frequency_category != 'Common'")
+    with pytest.raises(RuntimeError, match="gold_frequency_mix_matches_silver"):
+        _execute_notebook("04_quality_gate.py", runtime)
+    quality = runtime.table("workspace.drugsafety360_ops.quality_check_log")
+    assert quality.where("passed = false").count() >= 1

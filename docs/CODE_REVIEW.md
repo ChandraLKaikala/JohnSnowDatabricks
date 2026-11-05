@@ -92,3 +92,32 @@ The corrected version-controlled dashboard:
 This is NOT evidence that all charts render in the actual Databricks dashboard. API save/read-back is a metadata check. Running a source SELECT in Genie checks SQL access, not visual rendering. Existing Unity Catalog contains no DrugSafety360 Bronze/Silver/Gold/ops schemas; deployment and actual Delta writes remain untested.
 
 See FULL_PROJECT_AUDIT.md for the comprehensive audit and blockers.
+
+## Deployment status reconciliation — November 5, 2026
+
+The November 4 caveats above were written before deployment. Verified in this workspace on 2026-11-05:
+
+- The Free Edition user CAN create `workspace.drugsafety360_*` schemas/tables: 4 schemas, 16 Delta tables exist.
+- Serverless job `drugsafety360_refresh` (bronze → silver → gold → quality) ran end-to-end; the quality gate passed and tier counts reconcile (64,482 ADR / 5,713 chemical / 2,020 narrative reference rows).
+- The published source-explorer dashboard renders and is published.
+
+Remaining honest limits: writes are one Delta table per task, so multi-table ACID atomicity across the four tasks is still NOT guaranteed (partial runs are surfaced by the checks below, never atomic); Marketplace downstream-copy rights remain unconfirmed.
+
+## November 5, 2026 code-review remediation (46 findings)
+
+Applied in this commit:
+
+- All four pipeline notebooks pin `spark.sql.session.timeZone` to UTC, so timestamps are timezone-consistent across layers and reproducible across environments.
+- Silver explicitly normalizes types: SPC date → date, MedDRA PT/SOC codes → string identifiers, ambiguity/source flags → boolean, regardless of provider column types.
+- The Bronze ingestion log gained an explicit `poll_complete` transaction flag. The quality gate verifies the committed poll carries it and reports (informationally) any unlogged orphan Bronze snapshot rows, so partial runs are visible instead of silent.
+- The quality gate materializes each Silver count once and reuses it for every reconciliation: one consistent observation, no repeated full scans that could see different states.
+- Post-deployment SQL now detects orphan snapshots per Bronze table and reconciles all seven Gold marts against Silver in one result set, not only ADR counts.
+- CI: added a hard dependency-import guard; a missing `pyspark` under CI is a loud failure instead of a silent skip; pytest upper-bounded (<9) with `pyspark==3.5.3` pinned for reproducible runs.
+- The single long Spark scenario was split into focused tests (bronze idempotence, silver quarantine/privacy, gold reconciliation, quality pass, changed-snapshot versioning, failed-poll write prevention, orphan tolerance, wrong-snapshot/truncated-gold failure), with the end-to-end sweep retained.
+- Contract tests now pin UTC configuration and type casts by AST constant values (not substrings), and assert the `poll_complete` flag contract.
+- Docs (this file, ARCHITECTURE, FULL_PROJECT_AUDIT) reconciled with the deployed state.
+
+Documented design decisions (not code changes):
+
+- CI metrics (4 synthetic rows) prove transformation logic only; they never prove, equal, or substitute for deployed counts (64,482 / 5,713 / 2,020). Test metrics and normalized deployed metrics are different datasets by construction.
+- Dev-vs-prod bundle environment separation, a combined ops metrics/status framework, and Marketplace copy-rights confirmation remain deliberate follow-ups, not silent omissions.

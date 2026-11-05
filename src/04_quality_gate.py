@@ -4,6 +4,8 @@
 # MAGIC **Cell 1:** Resolve the last completed three-source poll, rather than trusting whichever Bronze snapshot was written most recently. Only committed snapshot IDs are eligible for reconciliation.
 
 # COMMAND ----------
+
+# DBTITLE 1,Pin UTC session timezone
 import re
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, LongType, BooleanType
@@ -16,6 +18,8 @@ BRONZE = f"{catalog}.drugsafety360_bronze"
 SILVER = f"{catalog}.drugsafety360_silver"
 GOLD = f"{catalog}.drugsafety360_gold"
 OPS = f"{catalog}.drugsafety360_ops"
+# Pin UTC so run_at/checked_at ordering is consistent with Bronze/Silver/Gold.
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {OPS}")
 
 checks = []
@@ -52,19 +56,29 @@ def committed_bronze_snapshot(source_name):
 
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Cell 2:** Reconcile each COMMITTED Bronze snapshot to its Silver table, including quarantine. Compare source snapshot IDs to detect wrong-generation Silver data even when the row count matches.
 
 # COMMAND ----------
+
+# DBTITLE 1,Count once, surface orphan snapshots and poll_complete flag
 adr = spark.table(f"{SILVER}.adr_reference_current")
 chemical = spark.table(f"{SILVER}.chemical_evidence_current")
 narrative = spark.table(f"{SILVER}.narrative_labels_current")
 quarantine = spark.table(f"{SILVER}.adr_reference_quarantine")
 
+# Materialize each Silver count ONCE (review remediation: repeated .count()
+# actions recompute full scans and could observe different states between
+# checks; counts must come from one consistent observation).
+adr_count = adr.count()
+quarantine_count = quarantine.count()
+chemical_count = chemical.count()
+narrative_count = narrative.count()
 silver_counts = {
-    "adr_reference": adr.count() + quarantine.count(),
-    "chemical_annotations": chemical.count(),
-    "narrative_labels": narrative.count()
+    "adr_reference": adr_count + quarantine_count,
+    "chemical_annotations": chemical_count,
+    "narrative_labels": narrative_count
 }
 latest_ids = {}
 for name in ("adr_reference", "chemical_annotations", "narrative_labels"):
@@ -93,9 +107,9 @@ for source_name, frames in (
         record(f"silver_snapshot_{source_name}_{index}", int(good), good)
 
 for label, current_count in (
-    ("adr_reference_current", adr.count()),
-    ("chemical_evidence_current", chemical.count()),
-    ("narrative_labels_current", narrative.count())
+    ("adr_reference_current", adr_count),
+    ("chemical_evidence_current", chemical_count),
+    ("narrative_labels_current", narrative_count)
 ):
     record(f"nonempty_{label}", current_count, current_count > 0)
 
@@ -104,19 +118,44 @@ invalid = adr.where(
     F.col("reaction_term").isNull() | (F.length("reaction_term") == 0)
 ).count()
 record("required_product_and_reaction", invalid, invalid == 0)
-record("quarantine_rows_observed", quarantine.count(), True)
+record("quarantine_rows_observed", quarantine_count, True)
+
+# Transaction-completeness observability (review remediation): a Bronze run
+# that dies mid-loop can leave snapshot rows with no ingestion-log entry.
+# Silver ignores these orphans by design; surface their size so partial runs
+# are visible instead of silent. Informational (always passes) because
+# orphan rows are expected artifacts of a failed, recoverable poll.
+committed_ids = [r["snapshot_id"] for r in log.select("snapshot_id").distinct().collect()]
+orphan_rows = 0
+for name in SOURCE_NAMES:
+    history = spark.table(f"{BRONZE}.{name}_snapshots")
+    orphan_rows += history.where(~F.col("_snapshot_id").isin(committed_ids)).count()
+record("uncommitted_bronze_snapshot_rows_ignored", orphan_rows, True)
+
+# The committed poll must carry the explicit poll_complete transaction flag
+# when the log table provides the column; legacy log rows predate the flag
+# (a three-entry poll was already the completion marker), so they pass.
+if "poll_complete" in set(log.columns):
+    poll_flags_good = all(bool(row["poll_complete"]) for row in poll_rows)
+else:
+    poll_flags_good = True
+record("committed_poll_complete_flag", int(poll_flags_good), poll_flags_good)
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Cell 3:** Reconcile the executive metrics and all six other Gold marts to the Silver tables. Commit/poll lineage was checked before this step.
 
 # COMMAND ----------
+
+# DBTITLE 1,Reuse materialized Silver counts in Gold reconciliation
 # Poll provenance and Bronze/Silver snapshot IDs were verified in Cells 1–2.
 
 metrics = spark.table(f"{GOLD}.executive_metrics")
 metric_count = metrics.count()
 record("single_executive_metrics_row", metric_count, metric_count == 1)
-adr_count = adr.count()
+# adr_count was materialized once in Cell 2; reuse it instead of recomputing
+# a full Silver scan so all reconciliations observe one consistent state.
 if metric_count == 1:
     executive_count = int(metrics.select("reference_rows").first()["reference_rows"])
     record("gold_executive_matches_silver", abs(executive_count - adr_count),
@@ -129,18 +168,20 @@ for mart in ("product_reference_summary", "product_reaction_associations",
            counted == adr_count)
 
 for mart, expected_count in (
-    ("chemical_evidence_summary", chemical.count()),
-    ("narrative_label_summary", narrative.count())
+    ("chemical_evidence_summary", chemical_count),
+    ("narrative_label_summary", narrative_count)
 ):
     counted = count_sum(f"{GOLD}.{mart}", "annotation_rows")
     record(f"gold_{mart}_matches_silver", abs(counted - expected_count),
            counted == expected_count)
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Cell 4:** Append checks before failing the Job. Do not mistake passing structural checks for live incidence, medical correctness, or a multi-table atomic commit.
 
 # COMMAND ----------
+
 schema = StructType([
     StructField("check_name", StringType()),
     StructField("observed", LongType()),

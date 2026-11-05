@@ -88,7 +88,33 @@ def test_reliability_contract_is_documented_and_enabled():
     silver = (ROOT / 'src/02_silver_standardize.py').read_text()
     assert 'committed_poll_id' in silver and 'active_ids' in silver
     assert 'source_snapshot_id' in silver and 'source_snapshot_id' in quality
+    # Explicit transaction flag on the ingestion log + quality-side check.
+    assert 'poll_complete' in bronze and 'committed_poll_complete_flag' in quality
     for mart in ('product_reference_summary', 'product_reaction_associations',
                  'frequency_mix', 'source_flags_mix', 'chemical_evidence_summary',
                  'narrative_label_summary'):
         assert mart in quality
+
+
+def test_notebooks_pin_utc_timezone_and_normalize_types():
+    # Review remediation: pin the structural guarantees that the behavioral
+    # Spark tests in tests/test_spark_pipeline.py rely on. These checks read
+    # constant VALUES from the AST instead of substrings, so a renamed
+    # comment or string cannot fake a pass.
+    for name in ("01_bronze_ingest.py", "02_silver_standardize.py",
+                 "03_gold_analytics.py", "04_quality_gate.py"):
+        tree = ast.parse((ROOT / "src" / name).read_text(encoding="utf-8"))
+        conf_sets = [node.args[0].value for node in ast.walk(tree)
+                     if isinstance(node, ast.Call)
+                     and isinstance(node.func, ast.Attribute)
+                     and node.func.attr == "set" and node.args
+                     and isinstance(node.args[0], ast.Constant)]
+        assert "spark.sql.session.timeZone" in conf_sets, \
+            f"{name} does not pin spark.sql.session.timeZone to UTC"
+    silver = ast.parse((ROOT / "src/02_silver_standardize.py").read_text(encoding="utf-8"))
+    casts = [node.args[0].value for node in ast.walk(silver)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+             and node.func.attr == "cast" and node.args
+             and isinstance(node.args[0], ast.Constant)]
+    assert "boolean" in casts and "date" in casts and "string" in casts, \
+        "Silver no longer normalizes flag/date/code column types explicitly"

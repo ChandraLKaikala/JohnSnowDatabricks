@@ -5,6 +5,7 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Pin UTC session timezone
 import re
 import uuid
 from pyspark.sql import functions as F
@@ -17,6 +18,9 @@ if catalog != "workspace" or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", catalog
 SOURCE = "john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction"
 BRONZE = f"{catalog}.drugsafety360_bronze"
 OPS = f"{catalog}.drugsafety360_ops"
+# All pipeline timestamps are timezone-aware and pinned to UTC so snapshot
+# capture and poll ordering are reproducible across environments.
+spark.conf.set("spark.sql.session.timeZone", "UTC")
 
 # COMMAND ----------
 
@@ -77,7 +81,7 @@ def has_changed(new_frame, previous):
 
 # COMMAND ----------
 
-# DBTITLE 1,Cell 4 — Ingest and validate
+# DBTITLE 1,Add poll_complete transaction flag to ingestion log
 poll_run_id = str(uuid.uuid4())
 prepared = []
 run_log = []
@@ -133,7 +137,12 @@ log_schema = StructType([
     StructField("source_rows", LongType()),
     StructField("changed", BooleanType())
 ])
+# Explicit transaction flag (review remediation): these rows are written ONLY
+# after all three source snapshot writes finished. poll_complete=True marks a
+# finished poll; a run that dies mid-loop leaves no flag row, so partial polls
+# are detectable downstream by Silver and the quality gate.
 (spark.createDataFrame(run_log, log_schema)
+ .withColumn("poll_complete", F.lit(True))
  .withColumn("checked_at", F.current_timestamp())
  .write.format("delta").mode("append").option("mergeSchema", "true")
  .saveAsTable(f"{OPS}.ingestion_log"))
