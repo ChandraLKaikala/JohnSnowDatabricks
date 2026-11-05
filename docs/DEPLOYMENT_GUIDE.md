@@ -82,3 +82,18 @@ Only after Gold tables exist and pass quality checks, create or edit an AI/BI da
 
 ## 8. Zero-error caveat
 CI checks Python syntax and configuration, and exercises notebook transformations using local PySpark with a simulated table writer. It does not run Databricks Delta/Unity Catalog writes, bundle deployment, permissions, quotas, or provider licensing checks. If a run fails, save the failing task name, error text and run ID (redact secrets/PII), then follow `docs/TROUBLESHOOTING.md`.
+
+
+## 9. Source dashboard verification and acceptance
+
+The GitHub source-explorer dashboard was repaired to use supported queryLines datasets with real JSL source SQL and aligned widget query/encoding field names. It is a *source explorer*, not a Gold dashboard.
+
+To verify real rendering in Databricks:
+1. Open the existing DrugSafety360 John Snow Labs Source Explorer draft in AI/BI Dashboards.
+2. Confirm all fourteen visualizations render rather than showing parse errors, missing selected fields or unsupported widgets.
+3. Check the SQL warehouse assigned to the dashboard and verify the viewer has permission to query all three source tables.
+4. Compare row count counters against read-only SQL reference values (64,482 ADR reference rows; 5,713 chemical annotations; 2,020 narrative labels as observed in November 2026).
+5. Review the displayed text for privacy and interpretation. Do not publish until viewer permissions and visualization rendering are confirmed.
+6. If Gold-backed dashboards are required, deploy the separate Bronze/Silver/Gold job first and build those dashboards only after the corresponding UC tables exist.
+
+A saved dashboard definition or passing static GitHub check is NOT proof of visual rendering or a deployed Medallion pipeline. See FULL_PROJECT_AUDIT.md.
