@@ -484,9 +484,8 @@ def test_silver_ignores_uncommitted_orphan_snapshot(spark_session, monkeypatch):
     orphan = (runtime.table(bronze).where("Medicinal_Product = 'Drug B'")
               .withColumn("_snapshot_id", F.lit("UNCOMMITTED_ORPHAN"))
               .withColumn("_captured_at", F.current_timestamp()))
-    # The fixture intentionally contains TWO identical Drug A rows, so the
-    # orphaned snapshot carries 2 rows, not 1.
-    assert orphan.count() == 2
+    # The orphan fixture selects the unique Drug B record, not duplicate Drug A.
+    assert orphan.count() == 1
     runtime.tables[bronze] = runtime.table(bronze).unionByName(orphan)
     _execute_notebook("02_silver_standardize.py", runtime)
     accepted = runtime.table("workspace.drugsafety360_silver.adr_reference_current")
