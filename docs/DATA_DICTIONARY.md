@@ -18,8 +18,8 @@ All sources are under `john_snow_labs_adverse_drug_and_product_reaction.drug_and
 | `spc_label_date` | `Date_Of_Most_Recent_SPC` | Date on product label/SPC; **not** event onset |
 | `reaction_term` | `Adverse_Drug_Reaction_Term` | Drug reaction reference term |
 | `meddra_pt_text` | `MedDRA_PT_Text` | MedDRA preferred term text |
-| `meddra_pt_code` | `MedDRA_PT_Code` | Integer PT code |
-| `meddra_soc_code` | `MedDRA_SOC_Code` | Integer SOC code |
+| `meddra_pt_code` | `MedDRA_PT_Code` | PT code, cast to STRING in Silver (identifier, not arithmetic) |
+| `meddra_soc_code` | `MedDRA_SOC_Code` | SOC code, cast to STRING in Silver (identifier, not arithmetic) |
 | `labeled_age_group` | `Age_Group` | Label restriction/category, frequently unspecified |
 | `labeled_gender` | `Gender` | Label restriction/category, frequently unspecified |
 | `causality_label` | `Causality` | Provider assessment text, not fresh causal inference |

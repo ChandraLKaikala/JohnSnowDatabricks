@@ -138,3 +138,9 @@ Fixes applied in this commit:
 10. **No-secrets contract test checked one impossible example string.** The scan now detects realistic credential shapes instead: Databricks PATs (`dapi…`), URL-embedded passwords, `api_key`/`secret_access_key` assignments, AWS access-key IDs, and PEM private-key blocks.
 
 Honest limits after this round: unchanged — writes are one Delta table per task (no cross-table ACID atomicity), and Marketplace downstream-copy rights remain unconfirmed. Verified: all 9 contract tests pass; integration tests require a real local Spark session and therefore run in GitHub CI (a local SparkSession cannot be created on Databricks serverless).
+
+Additional round-2 verification notes:
+
+- **Dashboard drift resolved by verification, not by committing the export.** The live dashboard export was compared semantically (sorted-key JSON) against the tracked `dashboards/jsl_source_explorer.lvdash.json`: identical except one `uiSettings` key (viewer theme/apply-mode state, not content). The tracked file remains canonical; re-committing per-viewer UI state would create permanent churn. Any future CONTENT change must update the tracked file.
+- **MedDRA type change now fully documented.** ARCHITECTURE and DATA_DICTIONARY previously still described `MedDRA_PT_Code`/`MedDRA_SOC_Code` as `int`; both now document the STRING cast in Silver (identifier, not arithmetic) consistent with the deployed schema, the Gold marts (which aggregate distinct code VALUES) and the dashboard (verified rendering after the round-1 change).
+- **Parallel CI fix merged.** Commit 02b0ca0 (synthetic-runtime `conf` exposure + focused-test poll-count corrections) was pulled and merged; the single conflicting comment hunk was resolved to the more explanatory wording with identical assertions, and the early-failure log expectations were layered on top.

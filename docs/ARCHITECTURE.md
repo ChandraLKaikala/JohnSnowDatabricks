@@ -61,8 +61,8 @@ This design is **idempotent for unchanged source** in sequential runs. It is not
 
 ## Silver semantics
 Silver current tables use the **last completed three-source ingestion poll's manifest**, not the newest raw Bronze snapshot. A failed ingestion may append one Bronze table without committing a complete poll; newer unlogged data are kept for recovery but never used by Silver. Only accepted ADR rows with product and reaction terms enter the current table; invalid rows are in the quarantine table. Row duplicates may reflect repeated label associations, so do not deduplicate blindly. Null age, gender, and frequency values are expected labels, not automatically corrupt records. Carefully distinguish coding fields:
-- `MedDRA_PT_Code`: preferred-term code (int)
-- `MedDRA_SOC_Code`: system organ class code (int)
+- `MedDRA_PT_Code`: preferred-term code (cast to STRING in Silver; identifier, not arithmetic — malformed/unparseable values are normalized to NULL, never silently numeric-coerced)
+- `MedDRA_SOC_Code`: system organ class code (cast to STRING in Silver; identifier, not arithmetic — malformed/unparseable values are normalized to NULL, never silently numeric-coerced)
 - `Date_Of_Most_Recent_SPC`: label date (DATE)
 - `Is_Clinical_Trial`, `Is_Post_Marketing_Surveillance`: source flags, not cohort sizes
 
