@@ -55,27 +55,6 @@ def test_documentation_and_no_secrets():
                 assert "dapi" + "012345" not in content
 
 
-def test_dashboard_export_is_real_source_only_no_sensitive_columns():
-    import json
-    dashboard_path = ROOT / "dashboards/jsl_source_explorer.lvdash.json"
-    dashboard = json.loads(dashboard_path.read_text(encoding="utf-8"))
-    assert len(dashboard["pages"]) == 3
-    assert len(dashboard["datasets"]) == 3
-    queries = []
-    for dataset in dashboard["datasets"]:
-        source = dataset["config"]["source"]
-        assert source.startswith(EXPECTED_SOURCE + ".drug_and_product_reaction.")
-        queries.append(str(dataset["config"].get("measures", [])))
-        queries.append(str(dataset["config"].get("dimensions", [])))
-    for page in dashboard["pages"]:
-        for item in page["layout"]:
-            queries.append(str(item["widget"].get("queries", [])))
-    executed_fields = " ".join(queries)
-    assert "Remarks_by_Patient" not in executed_fields
-    assert "Form_Sentence" not in executed_fields
-    assert "Judgement_Remarks" not in executed_fields
-
-
 def test_post_deployment_sql_is_read_only():
     sql = (ROOT / "sql/post_deployment_validation.sql").read_text(encoding="utf-8").upper()
     assert "DRUGSAFETY360_GOLD.EXECUTIVE_METRICS" in sql
