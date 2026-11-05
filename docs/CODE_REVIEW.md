@@ -73,3 +73,22 @@ The earlier CI did NOT test failures caused by an unreadable third source, nor d
 **Correction:** Silver requires a three-source completed ingestion-log poll and resolves the exact logged snapshot ID per source. It checks all three snapshots before overwriting Silver and propagates `source_snapshot_id` into each Silver output. Quality validates the same completed poll, verifies every nonempty Silver output has the right snapshot ID (not just the right count), and reconciles all seven Gold marts.
 
 **Regression tests:** An artificial newer, unlogged Bronze snapshot must be ignored by Silver. A Silver table containing the same number of rows but a wrong snapshot ID must trigger a quality failure. These are local Spark tests with mocked storage; they do not prove transactional consistency of actual Delta writes or Databricks runtime deployment.
+
+
+## Full repository dashboard contract audit — November 2026
+
+An inspection of the ACTUAL saved Lakeview draft and exported repository JSON found:
+- Invalid dataset definition using custom config.source instead of the documented queryLines SQL dataset.
+- Invalid count expression COUNT of a quoted asterisk and unmatched widget query expressions referencing undeclared MEASURE aliases.
+- Widget encoding field names that did not match selected query field names; extra nonstandard spec.data fields.
+- A test suite that explicitly expected the incorrect dashboard structure, letting a green GitHub badge coexist with invalid dashboard JSON.
+
+The corrected version-controlled dashboard:
+- Has three SQL-backed source datasets with a literal record_marker column used for counts.
+- Selects only allowlisted JSL fields, avoiding patient narrative text.
+- Has fourteen visuals using inline COUNT / COUNT DISTINCT and matching query-field/encoding names.
+- Has an independent dashboard contract test and GitHub CI checks.
+
+This is NOT evidence that all charts render in the actual Databricks dashboard. API save/read-back is a metadata check. Running a source SELECT in Genie checks SQL access, not visual rendering. Existing Unity Catalog contains no DrugSafety360 Bronze/Silver/Gold/ops schemas; deployment and actual Delta writes remain untested.
+
+See FULL_PROJECT_AUDIT.md for the comprehensive audit and blockers.
