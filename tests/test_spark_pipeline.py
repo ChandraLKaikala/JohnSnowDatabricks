@@ -39,6 +39,9 @@ class _Widgets:
 class _Runtime:
     def __init__(self, session):
         self.session = session
+        # Real notebooks configure Spark session settings such as UTC timezone.
+        # Expose the genuine SparkConf API through the synthetic catalog adapter.
+        self.conf = session.conf
         self.tables = {}
         self.created_schemas = []
         self.catalog = SimpleNamespace(tableExists=lambda name: name in self.tables)
@@ -413,9 +416,10 @@ def test_changed_snapshot_appends_new_bronze_version_and_refreshes_gold(spark_se
     assert runtime.table(bronze).count() == 9  # first 4 rows + second 5-row snapshot
     assert runtime.table(bronze).select("_snapshot_id").distinct().count() == 2
     new_log = runtime.table("workspace.drugsafety360_ops.ingestion_log")
-    assert new_log.count() == 9
+    # This focused test starts with ONE committed poll (3 rows), then adds ONE (3 rows).
+    assert new_log.count() == 6
     assert new_log.where("changed = true").count() == 4  # first 3 + changed ADR
-    assert new_log.select("poll_run_id").distinct().count() == 3
+    assert new_log.select("poll_run_id").distinct().count() == 2
     _execute_notebook("02_silver_standardize.py", runtime)
     _execute_notebook("03_gold_analytics.py", runtime)
     updated = runtime.table("workspace.drugsafety360_gold.executive_metrics").first()
@@ -453,7 +457,8 @@ def test_failed_third_source_prevents_all_bronze_writes(spark_session, monkeypat
 def test_silver_ignores_uncommitted_orphan_snapshot(spark_session, monkeypatch):
     runtime = _prepare(spark_session, monkeypatch, "gold")
     bronze = "workspace.drugsafety360_bronze.adr_reference_snapshots"
-    orphan = (runtime.table(bronze).where("Medicinal_Product = 'Drug A'")
+    # Drug A is intentionally duplicated; use the single Drug B reference row.
+    orphan = (runtime.table(bronze).where("Medicinal_Product = 'Drug B'")
               .withColumn("_snapshot_id", F.lit("UNCOMMITTED_ORPHAN"))
               .withColumn("_captured_at", F.current_timestamp()))
     assert orphan.count() == 1
