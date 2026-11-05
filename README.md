@@ -82,3 +82,10 @@ The latest audit adds all-source preflight before any Bronze writes, a poll-leve
 ### Committed-snapshot protection
 
 Silver reads the last completed three-source Bronze ingestion **manifest**, not an unlogged newer Bronze snapshot from an interrupted run. Each Silver table carries its source snapshot ID, and the quality gate checks these IDs and row counts. See [CODE_REVIEW](docs/CODE_REVIEW.md). This does **not** turn cross-table overwrites into a single atomic transaction.
+
+
+## Full code and workspace audit (2026-11-04)
+
+The earlier dashboard export used a broken dataset contract and unbound measure expressions. The reviewed source-dashboard JSON now uses SQL queryLines, a record_marker COUNT, and matching widget field bindings. The GitHub workflow tests these bindings. Refer to [FULL_PROJECT_AUDIT](docs/FULL_PROJECT_AUDIT.md) for verified findings and remaining risks.
+
+**Important:** the connected Databricks workspace currently has ZERO DrugSafety360 Bronze/Silver/Gold/operations schemas and no executed Gold executive table. Three John Snow Labs source tables exist, but code in GitHub is not a deployment. Do NOT describe this project as error-free or deployed until the actual Databricks bundle, Delta writes and visual widgets pass in the workspace.
