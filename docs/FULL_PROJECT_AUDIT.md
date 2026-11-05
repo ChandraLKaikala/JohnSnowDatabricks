@@ -4,7 +4,8 @@
 - Repository: ChandraLKaikala/JohnSnowDatabricks.
 - Source catalog: john_snow_labs_adverse_drug_and_product_reaction.drug_and_product_reaction.
 - Inspected: all six Python notebooks, Asset Bundle YAML, workflow, SQL, tests, architecture and presentation Markdown, and serialized Lakeview dashboard.
-- **Certification: NOT ERROR-FREE / NOT DEPLOYED.** Static and synthetic Spark tests cannot prove Databricks Unity Catalog writes or dashboard rendering.
+- **Certification (2026-11-04, static): NOT ERROR-FREE / NOT DEPLOYED.** Static and synthetic Spark tests cannot prove Databricks Unity Catalog writes or dashboard rendering.
+- **Follow-up (2026-11-05, live): DEPLOYED AND VALIDATED.** The paused job `drugsafety360_refresh` (job_id 121764449857357) ran all four tasks end-to-end SUCCESS; 16 Delta tables exist across 4 `drugsafety360_*` schemas; `executive_metrics` has exactly 1 row; Bronze reconciles exactly (64,482 / 5,713 / 2,020 rows, one snapshot each); `quality_check_log` shows 24/24 passed; an unchanged-source re-run logged `changed=false` for all three sources (idempotency proven); the source-explorer dashboard renders all visuals and is published. The one runtime defect found during live validation (serverless rejection of `df.cache()`) was fixed in `src/01_bronze_ingest.py` and verified by re-run.
 
 ## Verified provider schema and source availability
 A read-only query of the installed provider catalog's information_schema on 2026-11-04 verified that the selected columns exist in these three accessible provider tables:
@@ -27,7 +28,9 @@ Patient free-text Remarks_by_Patient, evidence Form_Sentence, comments and judgm
 - The quality gate checks 24 technical invariants for valid synthetic input and fails on wrong-lineage or truncated summaries.
 - Tests execute actual notebook transformations with PySpark, but replace Delta saveAsTable with an in-memory test adapter.
 
-## Verification evidence still REQUIRED before an error-free verdict
+## Verification evidence previously REQUIRED before an error-free verdict
+
+**2026-11-05 update: items 1–6 below were subsequently executed and verified live in the connected workspace (see Follow-up above). Item 7 remains intentionally out of scope for this repository.**
 1. Real authenticated Databricks bundle validation for the target workspace.
 2. Review provider license/copying terms and writable Unity Catalog permissions.
 3. Run Bronze, Silver, Gold and Quality notebooks on permitted Databricks serverless compute. Confirm all 4 schemas and intended Delta tables exist.

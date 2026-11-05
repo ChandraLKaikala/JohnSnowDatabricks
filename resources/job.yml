@@ -1,7 +1,7 @@
 resources:
   jobs:
     drugsafety360_refresh:
-      name: "[${bundle.target}] DrugSafety360 | JSL snapshots → Bronze → Silver → Gold → Quality"
+      name: drugsafety360_refresh
       description: "Historical source-change polling; NOT a real-time adverse-event feed."
       max_concurrent_runs: 1
       schedule:

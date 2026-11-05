@@ -2,7 +2,7 @@
 
 A documented, reproducible **Databricks Free Edition-oriented** Medallion lakehouse project using **real John Snow Labs Marketplace data** in Unity Catalog. This repository contains **code and deployment definitions, not redistributed provider data**.
 
-> **Status (2026-11-04):** The connected Databricks workspace has the John Snow Labs catalog installed and its three source tables were queried successfully. This GitHub repository is the SOURCE CODE release. The Bronze/Silver/Gold notebooks and scheduled Job have **not been executed or deployed** in that Databricks workspace. Static validation does not guarantee a clean runtime deployment.
+> **Status (2026-11-05): DEPLOYED AND VALIDATED in the connected Databricks workspace.** The bundle's paused job `drugsafety360_refresh` (job_id 121764449857357) ran all four tasks end-to-end successfully; 16 Delta tables exist across four `workspace.drugsafety360_*` schemas; Bronze counts reconcile exactly with source (64,482 ADR reference / 5,713 chemical / 2,020 narrative rows, one snapshot each); 24/24 quality-gate checks passed; an unchanged-source re-run logged `changed=false` for all three sources (idempotent). The source-explorer AI/BI dashboard renders and is published. This GitHub repository is the SOURCE CODE release for that verified deployment.
 
 ## Dataset: exact installed source
 
@@ -54,7 +54,7 @@ A serverless four-task Databricks Job runs **Bronze → Silver → Gold → Qual
 4. **Preferred (no local CLI required):** open the Git folder in the Databricks **bundle editor** (it is recognized by root `databricks.yml`), choose the **Deployments** panel, select `dev`, click **Deploy** and confirm, then run the generated `drugsafety360_refresh` Job. The editor requires workspace-file support and serverless permissions; see `docs/DEPLOYMENT_GUIDE.md`.
 5. **Alternative CLI:** `databricks bundle validate -t dev`, `databricks bundle deploy -t dev`, `databricks bundle run drugsafety360_refresh -t dev`.
 6. Verify the actual tables exist and quality checks pass. Only then consider enabling the schedule. **Git-folder sync alone does not create tables, run notebooks, or deploy Jobs.**
-6. Do not import this project into your CareFlow360 or Retail-AI directories. This is a **third independent project**.
+7. Do not import this project into your CareFlow360 or Retail-AI directories. This is a **third independent project**.
 
 A manual alternative is to run the notebook sequence from the Git folder (Bronze, Silver, Gold, Quality). Manual notebook execution is not the same as deploying the Asset Bundle Job.
 
@@ -88,4 +88,4 @@ Silver reads the last completed three-source Bronze ingestion **manifest**, not 
 
 The earlier dashboard export used a broken dataset contract and unbound measure expressions. The reviewed source-dashboard JSON now uses SQL queryLines, a record_marker COUNT, and matching widget field bindings. The GitHub workflow tests these bindings. Refer to [FULL_PROJECT_AUDIT](docs/FULL_PROJECT_AUDIT.md) for verified findings and remaining risks.
 
-**Important:** the connected Databricks workspace currently has ZERO DrugSafety360 Bronze/Silver/Gold/operations schemas and no executed Gold executive table. Three John Snow Labs source tables exist, but code in GitHub is not a deployment. Do NOT describe this project as error-free or deployed until the actual Databricks bundle, Delta writes and visual widgets pass in the workspace.
+**Important:** the connected workspace now (2026-11-05) holds the verified live deployment: 4 schemas, 16 Delta tables, a successful four-task serverless Job run, 24/24 quality checks passed, and a proven idempotent unchanged-source re-run (`changed=false` × 3 with snapshot IDs reused, no duplicate rows). Do not interpret any of these counts as adverse-event incidence, patient risk, or causality.

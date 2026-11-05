@@ -66,10 +66,10 @@ SELECT * FROM workspace.drugsafety360_gold.executive_metrics;
 SELECT * FROM workspace.drugsafety360_ops.quality_check_log ORDER BY run_at DESC LIMIT 30;
 ```
 
-Re-run Bronze on unchanged data and confirm the poll log says `changed=false` and that Bronze snapshot count is unchanged. Verify accepted + quarantined ADR rows reconcile with the **latest completed ingestion poll's committed ADR snapshot ID**, not an unlogged newer Bronze snapshot; source contents may change.
+Re-run Bronze on unchanged data and confirm the poll log says `changed=false` and that Bronze snapshot count is unchanged. (Verified live 2026-11-05: 6 ingestion-log rows, 3 `changed=false`, exactly one snapshot per Bronze table.) Verify accepted + quarantined ADR rows reconcile with the **latest completed ingestion poll's committed ADR snapshot ID**, not an unlogged newer Bronze snapshot; source contents may change.
 
 ## 6. Dashboard
-The existing Databricks `DrugSafety360 — John Snow Labs Source Explorer [Medallion Pending]` was created through the connected AI/BI dashboard API and currently queries the **provider tables directly**. It is NOT a Gold-layer dashboard. Its widget definition was saved/read back, but not end-to-end visually executed.
+The connected workspace's dashboard `DrugSafety360 — John Snow Labs Source Explorer` (id `01f1d8b32b0615ecb9c23695dd8149a4`) queries the **provider tables directly**, all visuals render, and it is published with embedded credentials. It is NOT a Gold-layer dashboard; a Gold-backed dashboard can now be added since Gold tables exist and pass quality checks.
 
 Only after Gold tables exist and pass quality checks, create or edit an AI/BI dashboard whose queries reference `workspace.drugsafety360_gold` tables. Do not reuse a stale visualization expecting nonexistent tables.
 

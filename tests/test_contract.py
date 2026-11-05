@@ -40,6 +40,21 @@ def test_source_is_real_and_privacy_is_preserved():
     assert "drugsafety360_bronze" in bronze
     assert "drugsafety360_ops" in bronze
 
+def test_notebooks_avoid_unsupported_spark_cache_ops():
+    # Databricks serverless rejects Spark .cache()/.persist()/.unpersist() on serverless
+    # compute (CACHE_REQUIRES_NEWER_CLIENT_ON_SERVERLESS_GC, SQLSTATE 0A000). A bronze
+    # re-run failed on 2026-11-05 because of .cache(); forbid these calls in all
+    # notebooks. Detection walks the AST so comments/docs that merely mention the
+    # APIs do not trigger the check.
+    for name in NOTEBOOKS:
+        source = (ROOT / "src" / name).read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("cache", "persist", "unpersist")):
+                raise AssertionError(
+                    f"{name} uses forbidden Spark cache op at line {node.lineno}: "
+                    f".{node.func.attr}()")
+
 def test_cleanup_notebook_never_modifies_workspace():
     audit = (ROOT / "src/00_workspace_readonly_audit.py").read_text()
     for prohibited in ("workspace.delete(", "workspace.move(", "workspace.import_(", "workspace.mkdirs(", "workspace.export("):

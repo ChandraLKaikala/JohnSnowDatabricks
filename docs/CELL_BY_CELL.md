@@ -68,13 +68,14 @@ This guide follows the `# COMMAND ----------` boundaries in the six source noteb
 - Caveat: hash-based comparisons are not a general CDC guarantee. Full scans cost compute; the privacy/licensing position still applies.
 
 ### Cell 4 — Ingest and validate
-- Validates and caches all THREE source tables before writing. Missing/empty third-source data cannot cause a partial first/second-source refresh.
+- Validates all THREE source tables before writing. Missing/empty third-source data cannot cause a partial first/second-source refresh.
+- **No `df.cache()`** — Databricks serverless rejects cache/persist/unpersist (`CACHE_REQUIRES_NEWER_CLIENT_ON_SERVERLESS_GC`, SQLSTATE 0A000); the fixed notebook re-scans sources without caching (verified live 2026-11-05).
 - Rejects empty source tables before any workspace schema creation or snapshot write.
 - Writes a new Delta **append** snapshot only when the multiset changes. Each write has `_snapshot_id`, `_captured_at`, `_source_table`, `_record_hash`.
 - On unchanged data, retains the previous Bronze snapshot and logs its REAL snapshot ID, not the string `unchanged`. Each three-source poll uses one unique `poll_run_id`.
 
 ### Cell 5 — Observability
-- Cell 4 appends `ingestion_log` only after all three source snapshot writes succeed; the log contains `poll_run_id`, source name, row count, actual active snapshot ID, changed flag and check timestamp. Cached source frames are unpersisted even on failure.
+- Cell 4 appends `ingestion_log` only after all three source snapshot writes succeed; the log contains `poll_run_id`, source name, row count, actual active snapshot ID, changed flag and check timestamp. No Spark cache/persist is used; source frames are simply re-scanned per action (serverless-compatible).
 - This is a low-cost basis for a freshness/operations report; it does **not** mean every change was immediately observed.
 
 ## Notebook 02_silver_standardize.py — Normalized Silver plus quarantine
